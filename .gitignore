@@ -1,0 +1,9 @@
+/AssetBundleInfo/
+/node_modules/
+*-lock.json
+*-lock.yaml
+/.idea/
+/compare/
+/assets/
+/analysing/
+/history_store/
