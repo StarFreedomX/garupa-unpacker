@@ -3,7 +3,7 @@
     "rootDir": "src",
     "outDir": "./dist",
     "target": "es2022",
-    "module": "esnext",
+    "module": "NodeNext",
     "declaration": true,
     "skipLibCheck": true,
     "esModuleInterop": true,

@@ -7,3 +7,6 @@
 /assets/
 /analysing/
 /history_store/
+.env
+/dist/
+/pnpm-workspace.yaml
