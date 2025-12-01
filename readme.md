@@ -14,7 +14,7 @@
 
 ### 初始化
 
-请确保已安装
+请确保已安装[Node.js](https://nodejs.org/zh-cn)
 
 ```shell
 # 安装 yarn
