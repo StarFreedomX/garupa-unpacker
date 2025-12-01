@@ -74,6 +74,15 @@ async function downloadFile(
     const url = `${baseUrl}${cleanPath}`;
     const savePath = path.join(saveRoot, cleanPath);
 
+    // 🟢 检查是否已存在，不重复下载
+    try {
+        await fs.access(savePath);
+        console.log(`[跳过] 已存在: ${cleanPath}`);
+        return true; // 直接成功
+    } catch {
+        // 文件不存在 -> 要下载
+    }
+
     let attempt = 0;
     let backoff = PER_FILE_BACKOFF_SECONDS;
 

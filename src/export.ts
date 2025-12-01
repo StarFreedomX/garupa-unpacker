@@ -6,13 +6,25 @@ import {fileURLToPath} from "url";
 
 const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-dotenv.config();
+const envPath = path.resolve(__dirname, "../.env");
+const examplePath = path.resolve(__dirname, "../.env.example");
+
+// 优先使用 .env，没有就自动 fallback 到 .env.example
+if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath });
+    console.log("Loaded: .env");
+} else if (fs.existsSync(examplePath)) {
+    dotenv.config({ path: examplePath });
+    console.log("Loaded: .env.example");
+} else {
+    console.warn("Warning: No .env or .env.example found.");
+}
 
 const UNITY_VERSION = process.env.UNITY_VERSION!;
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, ".."); // 项目根
 const ASSETS_DIR = path.join(PROJECT_ROOT, "assets");
 const ANALYSING_DIR = path.join(PROJECT_ROOT, "analysing");

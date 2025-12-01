@@ -108,7 +108,8 @@ export async function removeEmptyDirs(dir: string): Promise<boolean> {
  */
 export async function removeUnchangedFiles(
     change_old: string,
-    change: string
+    change: string,
+    removeOld=true
 ): Promise<string[]> {
     const oldFiles = await walkDir(change_old);
     const newFiles = await walkDir(change);

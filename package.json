@@ -11,6 +11,7 @@
     "rmuf": "npx tsx ./src/removeUnchangedFiles.ts",
     "da": "npx tsx ./src/decodeAcb.ts",
     "mb": "npx tsx ./src/mergeBytes.ts",
+    "ff": "npx tsx ./src/flatFolder.ts",
     "grp": "npx tsx ./src/index.ts"
   },
   "keywords": [],
