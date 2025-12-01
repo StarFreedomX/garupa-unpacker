@@ -1,6 +1,8 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import axios from 'axios';
+import {fileURLToPath} from "url";
+const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
 
 const JSON_PATH = "AssetBundleInfoUrl.json";
 const BASE_NAME = "AssetBundleInfo";
@@ -32,7 +34,7 @@ function incrementVersion(version: string): string {
  * 核心下载逻辑
  * @param inputUrl 可为空，为空时自动检查更新
  */
-export async function run(inputUrl?: string) {
+export async function downloadAB(inputUrl?: string) {
     inputUrl = inputUrl?.trim();
     let url = "";
     let version = "";
@@ -116,11 +118,11 @@ async function main() {
     rl.close();
 
     try {
-        const result = await run(input || undefined);
+        const result = await downloadAB(input || undefined);
         console.log(`处理完成: ${result.filePath}`);
     } catch (e) {
         console.error(`错误:`, e instanceof Error ? e.message : e);
     }
 }
-if (import.meta.main)
+if (isMainProcess)
     main();

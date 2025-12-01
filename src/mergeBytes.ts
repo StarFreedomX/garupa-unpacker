@@ -1,148 +1,174 @@
-import * as fs from 'fs/promises';
+import * as fs from 'node:fs/promises';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { createReadStream, createWriteStream } from 'fs';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { getCategoryPaths, getDefaultPaths } from "@/export.js";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// --- 配置常量 ---
-const ANALYSING_DIR_NAME = "analysing";
-const SEGMENT_PATTERN = /^(.+?)(?:-(\d+))?(\.[^.]+)\.bytes$/;
+const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
 
-// --- 工具函数 ---
-function versionSortKey(v: string): number[] {
-    return v.split('.').map(p => parseInt(p, 10)).filter(n => !isNaN(n));
-}
+// 正则：匹配 chorus342-001.acb、live123-456.acb
+const ACB_SEGMENT_PATTERN = /^(.+?)-(\d{3,})\.acb$/i;
 
-async function getLatestVersion(analysingDir: string): Promise<string> {
-    const entries = await fs.readdir(analysingDir, { withFileTypes: true });
-    const versions = entries
-        .filter(dirent => dirent.isDirectory() && /^\d+\.\d+\.\d+\.\d+/.test(dirent.name))
-        .map(dirent => dirent.name);
-
-    if (!versions.length) throw new Error(`assets/ 下没有可用版本文件夹`);
-
-    versions.sort((a, b) => {
-        const keyA = versionSortKey(a);
-        const keyB = versionSortKey(b);
-        for (let i = 0; i < keyA.length || i < keyB.length; i++) {
-            const numA = keyA[i] || 0;
-            const numB = keyB[i] || 0;
-            if (numA !== numB) return numB - numA;
-        }
-        return 0;
-    });
-
-    return versions[0];
-}
-
-// 递归获取目录下所有 .bytes 文件
-async function getAllBytesFiles(dir: string): Promise<string[]> {
+/**
+ * 递归获取目录下所有 .acb 文件
+ * @param dir 输入目录
+ * @return 返回acb文件的绝对路径
+ */
+async function getAllAcbFiles(dir: string): Promise<string[]> {
     const entries = await fs.readdir(dir, { withFileTypes: true });
-    let files: string[] = [];
+    const files: string[] = [];
+
     for (const entry of entries) {
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
-            files = files.concat(await getAllBytesFiles(fullPath));
-        } else if (entry.isFile() && entry.name.endsWith(".bytes")) {
+            files.push(...await getAllAcbFiles(fullPath));
+        } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.acb')) {
             files.push(fullPath);
         }
     }
     return files;
 }
 
-async function mergeBytesFiles(files: string[], outputDir: string, deleteSource = false): Promise<void> {
-    const baseMap = new Map<string, Array<{ index: number, filepath: string }>>();
+/**
+ * 按文件名中的数字排序（001 < 002 < 010）
+ */
+function numericSort(a: string, b: string): number {
+    return parseInt(a, 10) - parseInt(b, 10);
+}
 
-    for (const filepath of files) {
-        const filename = path.basename(filepath);
-        const match = filename.match(SEGMENT_PATTERN);
-        if (!match) continue;
+/**
+ * 合并同一组分段 ACB 文件
+ */
+async function mergeSegmentedAcb(
+    segments: Array<{ index: string; filepath: string }>,
+    outputPath: string
+): Promise<void> {
+    // 按数字顺序排序
+    segments.sort((a, b) => numericSort(a.index, b.index));
 
-        const baseName = match[1];
-        const index = match[2] ? parseInt(match[2], 10) : 0;
-        const ext = match[3];
-        const mapKey = `${baseName}${ext}`;
+    const writer = createWriteStream(outputPath);
 
-        if (!baseMap.has(mapKey)) baseMap.set(mapKey, []);
-        baseMap.get(mapKey)!.push({ index, filepath });
-    }
+    await new Promise<void>((resolve, reject) => {
+        let i = 0;
 
-    await fs.mkdir(outputDir, { recursive: true });
+        function pipeNext() {
+            if (i >= segments.length) {
+                writer.end();
+                return;
+            }
 
-    for (const [mapKey, parts] of baseMap.entries()) {
-        parts.sort((a, b) => a.index - b.index);
-        const outputPath = path.join(outputDir, mapKey);
-        if (parts.length > 1 || parts[0].index !== 0) {
-            const writer = createWriteStream(outputPath);
-            await new Promise<void>((resolve, reject) => {
-                let i = 0;
-                const pipeNext = () => {
-                    if (i >= parts.length) {
-                        writer.end();
-                        return;
-                    }
-                    const reader = createReadStream(parts[i].filepath);
-                    reader.on('error', reject);
-                    reader.pipe(writer, { end: false });
-                    reader.on('end', () => {
-                        i++;
-                        pipeNext();
-                    });
-                };
-                writer.on('finish', resolve);
-                writer.on('error', reject);
+            const reader = createReadStream(segments[i].filepath);
+            reader.on('error', reject);
+            reader.pipe(writer, { end: false });
+            reader.on('end', () => {
+                console.log(`  ${i===segments.length-1?'└─':'├─'} 合并分片: ${path.basename(segments[i].filepath)}`);
+                i++;
                 pipeNext();
             });
-            console.log(`[合并] ${mapKey} (${parts.length} 分段)`);
-        } else {
-            await fs.copyFile(parts[0].filepath, outputPath);
-            console.log(`[复制] ${mapKey}`);
         }
 
-        if (deleteSource) {
-            for (const part of parts) {
-                await fs.unlink(part.filepath);
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+        pipeNext();
+    });
+
+    console.log(`Success: 合并完成 → ${path.basename(outputPath)} (${segments.length} 片)`);
+}
+
+/**
+ * 查找目录下所有acb
+ * @param rootDir
+ * @param deleteSource
+ * @param outputToSameDir
+ */
+async function mergeAllSegmentedAcbFiles(
+    rootDir: string,
+    deleteSource = false,
+    outputToSameDir = true // 是否在原目录生成合并后的完整 acb
+): Promise<void> {
+    console.log('Start: 开始递归查找并合并分段 ACB 文件...\n');
+
+    const allAcbFiles = await getAllAcbFiles(rootDir);
+    if (allAcbFiles.length === 0) {
+        console.log('Warning: 未找到任何 .acb 文件');
+        return;
+    }
+
+    // 按所在目录分组
+    const groups = new Map<string, string[]>();
+
+    for (const file of allAcbFiles) {
+        const dir = path.dirname(file);
+        if (!groups.has(dir)) groups.set(dir, []);
+        groups.get(dir)!.push(file);
+    }
+
+    let mergedCount = 0;
+
+    for (const [dir, files] of groups) {
+        // 构建映射：baseName → 分段列表
+        const segmentMap = new Map<string, Array<{ index: string; filepath: string }>>();
+
+        for (const file of files) {
+            const filename = path.basename(file);
+            const match = filename.match(ACB_SEGMENT_PATTERN);
+
+            if (match) {
+                const baseName = match[1]; // chorus342
+                const index = match[2];    // 001
+                const key = baseName;      // 同一组用 baseName 聚合
+
+                if (!segmentMap.has(key)) segmentMap.set(key, []);
+                segmentMap.get(key)!.push({ index, filepath: file });
+            }
+        }
+
+        // 处理每一组需要合并的文件
+        for (const [baseName, parts] of segmentMap) {
+            if (parts.length <= 1) continue; // 只有一个分片，不需要合并
+
+            const finalAcbName = `${baseName}.acb`;
+            const outputPath = outputToSameDir
+                ? path.join(dir, finalAcbName)
+                : path.join(rootDir, 'merged_acb', finalAcbName);
+
+            // 创建输出目录（如果不是原目录）
+            if (!outputToSameDir) {
+                await fs.mkdir(path.dirname(outputPath), { recursive: true });
+            }
+
+            console.log(`\nFound: 发现分段文件组: ${baseName}.acb（共 ${parts.length} 片）`);
+            await mergeSegmentedAcb(parts, outputPath);
+            mergedCount++;
+
+            // 可选：删除源分片文件
+            if (deleteSource) {
+                await Promise.all(
+                    parts.map(p => fs.unlink(p.filepath).catch(() => {}))
+                );
+                console.log(`Deleted: 已删除 ${parts.length} 个源分片文件`);
             }
         }
     }
+
+    console.log(`\nFinish: 合并完成！共处理 ${mergedCount} 组分段 ACB 文件`);
 }
 
-// --- 主函数 ---
-async function main(deleteSource = false, version?: string): Promise<void> {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const PROJECT_ROOT = path.resolve(__dirname, '..');
-    const FULL_ANALYSING_DIR = path.join(PROJECT_ROOT, ANALYSING_DIR_NAME);
 
-    let latestVersion: string;
-    try {
-        latestVersion = await getLatestVersion(FULL_ANALYSING_DIR);
-    } catch (e) {
-        console.error((e as Error).message);
-        return;
-    }
-    console.log(`检测到最新版本: ${latestVersion}`);
 
-    const assetsDir = path.join(FULL_ANALYSING_DIR, version || latestVersion, "assets");
-    try {
-        await fs.access(assetsDir);
-    } catch {
-        console.error(`错误: assets 目录不存在: ${assetsDir}`);
-        return;
-    }
-    const allBytesFiles = await getAllBytesFiles(assetsDir);
-    if (!allBytesFiles.length) {
-        console.error(`未找到任何 .bytes 文件`);
-        return;
-    }
 
-    const outputDir = path.join(PROJECT_ROOT, 'merged_assets');
-    await mergeBytesFiles(allBytesFiles, outputDir, deleteSource);
-
-    console.log("\n处理完成。");
+if (isMainProcess) {
+    (async () => {
+        try {
+            const { output } = getDefaultPaths();
+            await mergeAllSegmentedAcbFiles(output,false,true)
+        } catch (err) {
+            console.error('Error: 合并过程出错：', err instanceof Error ? err.message : err);
+            process.exit(1);
+        }
+    })();
 }
 
-// 调用主函数，可传 true 删除源文件
-main(false, "9.3.0.180").catch(err => {
-    console.error("程序执行错误:", err instanceof Error ? err.message : err);
-    process.exit(1);
-});
+export { mergeAllSegmentedAcbFiles };

@@ -10,3 +10,4 @@
 .env
 /dist/
 /pnpm-workspace.yaml
+/yarn.lock

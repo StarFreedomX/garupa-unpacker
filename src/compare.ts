@@ -65,9 +65,7 @@ function formatVersion(v: VersionTuple): string {
     return v.extraNum > 1 ? `${v.baseVer}.${v.extraNum}` : v.baseVer;
 }
 
-// ---------------- 封装的核心业务函数 ----------------
-
-async function compareVersions(targetVersion?: string) {
+export async function compareVersions(targetVersion?: string) {
 
     const filesInDir = await fs.readdir(ASSET_DIR);
 
@@ -137,7 +135,7 @@ async function main() {
         console.log(`新增: ${summary.added}, 修改: ${summary.changed}`);
         console.log(`结果已保存到: ${outFile}`);
     } catch (err) {
-        console.error("❌ 出错:", err instanceof Error ? err.message : err);
+        console.error("出错:", err instanceof Error ? err.message : err);
     }
 }
 if (isMainProcess)

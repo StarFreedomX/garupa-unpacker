@@ -17,7 +17,7 @@ const HEADERS = {
 
 const URL_JSON_NAME = "AssetBundleInfoUrl.json";
 const DIFF_DIR_NAME = "compare";
-const ASSETS_DIR_NAME = "assets";
+const ASSETS_DIR_NAME = "analysing";
 
 /**
  * 获取资源路径URL前缀
@@ -114,7 +114,7 @@ async function downloadFile(
     return false;
 }
 
-async function downloadDiffAssets(PROJECT_ROOT: string): Promise<void> {
+export async function downloadDiffAssets(PROJECT_ROOT: string): Promise<void> {
 
     // AssetBundleInfo下载地址的json文件路径
     const FULL_URL_JSON_PATH = path.join(PROJECT_ROOT, URL_JSON_NAME);

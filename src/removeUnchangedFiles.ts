@@ -6,8 +6,6 @@ import { getDefaultPaths, getCategoryPaths } from "@/export.js";
 import { fileURLToPath } from "url";
 const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
 
-
-// Windows 对文件锁敏感，降低并发更稳定
 const limit = pLimit(5);
 
 function wait(ms: number) {
@@ -102,12 +100,16 @@ export async function removeEmptyDirs(dir: string): Promise<boolean> {
     }
 }
 
-
 /**
- * 对比 change_old 和 change 的内容，如果 change 中与 change_old 内容(文件路径相同)一致，
- * 则删除 change 中的文件（带自动重试机制）
+ * 对比 change_old 和 change 目录
+ * - 删除 change 中内容完全相同的文件（带重试）
+ * - 清理空文件夹
+ * - 返回：内容真正发生变化的文件绝对路径列表（new 目录中的路径）
  */
-export async function removeUnchangedFiles(change_old: string, change: string) {
+export async function removeUnchangedFiles(
+    change_old: string,
+    change: string
+): Promise<string[]> {
     const oldFiles = await walkDir(change_old);
     const newFiles = await walkDir(change);
 
@@ -115,58 +117,68 @@ export async function removeUnchangedFiles(change_old: string, change: string) {
     console.log(`  old: ${change_old}`);
     console.log(`  new: ${change}`);
 
+    // 构建 old 的相对路径 → 绝对路径映射
     const relativeMap = new Map<string, string>();
     for (const oldPath of oldFiles) {
         const rel = path.relative(change_old, oldPath);
         relativeMap.set(rel, oldPath);
     }
 
+    // 用来收集真正被修改的文件（new 目录中的路径）
+    const changedFiles: string[] = [];
+
     const tasks = newFiles.map(newPath =>
         limit(async () => {
             const rel = path.relative(change, newPath);
-            if (!relativeMap.has(rel)) return;
+            const oldPath = relativeMap.get(rel);
 
-            const oldFilePath = relativeMap.get(rel)!;
+            // 旧目录没有这个文件 → 新增文件，也算“修改”
+            if (!oldPath) return;
 
+
+            // 旧目录有，但内容可能相同
             const [oldHash, newHash] = await Promise.all([
-                hashFile(oldFilePath),
+                hashFile(oldPath),
                 hashFile(newPath)
             ]);
 
             if (oldHash === newHash) {
                 console.log(`删除未变化 → ${rel}`);
                 await safeDelete(newPath);
+            } else {
+                console.log(`内容已变 → ${rel}`);
+                changedFiles.push(newPath);
             }
         })
     );
 
     await Promise.all(tasks);
 
-    // -----------------------
-    // 🔥 新增：清理 change 目录中的空文件夹
-    // -----------------------
+    // 清理空文件夹
     console.log("清理空文件夹...");
     await removeEmptyDirs(change);
     console.log(`✔ 空文件夹清理完成`);
 
-    console.log(`✔ 完成：已删除未变化文件`);
+    console.log(`✔ 完成：共保留/新增 ${changedFiles.length} 个修改文件`);
+    return changedFiles;  // 返回修改的文件列表
 }
 
 
 
-// ----------------- 运行入口 -----------------
+// 运行入口
 if (isMainProcess) {
-    console.log("test");
+    // console.log("test");
     (async () => {
         const {input, output} = getDefaultPaths();
         const categoryFolders = getCategoryPaths(input);
 
         // 处理 change 与 change_old
         if (categoryFolders.includes("change") && categoryFolders.includes("change_old")) {
-            await removeUnchangedFiles(
+            const editedLists = await removeUnchangedFiles(
                 path.join(output, "change_old"),
                 path.join(output, "change")
             );
+            // console.log(editedLists)
         } else {
             console.log("未找到 change/change_old 文件夹，跳过比较。");
         }

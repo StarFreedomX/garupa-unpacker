@@ -20,7 +20,7 @@ const ANALYSING_DIR = path.join(PROJECT_ROOT, "analysing");
 /**
  * 获取 assets/ 下最新版本的文件夹名
  */
-function getLatestVersionFolder(baseDir: string): string | null {
+export function getLatestVersionFolder(baseDir: string): string | null {
     if (!fs.existsSync(baseDir)) return null;
 
     const dirs = fs
@@ -36,11 +36,11 @@ function getLatestVersionFolder(baseDir: string): string | null {
  * 获取默认输入输出路径
  */
 export function getDefaultPaths(): { input: string; output: string } {
-    const latestVersion = getLatestVersionFolder(ASSETS_DIR);
-    if (!latestVersion) throw new Error(`assets/ 下没有可用版本文件夹`);
+    const latestVersion = getLatestVersionFolder(ANALYSING_DIR);
+    if (!latestVersion) throw new Error(`analysing/ 下没有可用版本文件夹`);
 
-    const input = path.join(ASSETS_DIR, latestVersion);
-    const output = path.join(ANALYSING_DIR, latestVersion);
+    const input = path.join(ANALYSING_DIR, latestVersion);
+    const output = path.join(ASSETS_DIR, latestVersion);
 
     if (!fs.existsSync(output)) fs.mkdirSync(output, { recursive: true });
 
@@ -50,6 +50,7 @@ export function getDefaultPaths(): { input: string; output: string } {
 /**
  * 获取输入文件夹的子文件夹并返回
  * @param input 输入文件夹路径
+ * @return 文件夹名称，不是完整路径
  */
 export function getCategoryPaths(input: string): string[] {
     // 读取 input 目录下的项目
@@ -68,7 +69,7 @@ export async function exportLatestAssets(config?: Partial<ExportAssetsDefaultCon
     // 新建对象
     const exporter = new AssetExporter({
         unityVersion: UNITY_VERSION,
-        assetType: ["tex2d", "textasset", "sprite"], // 默认类型
+        assetType: ["all"], // 默认类型
         overwrite: true,
         group: "container",
         audioFormat: "wav",
