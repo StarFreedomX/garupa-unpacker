@@ -18,18 +18,14 @@
 
 ### 初始化
 
-请确保已安装
+请确保已安装好如下两个环境
 
-**Node.js**
-
-需要勾选额外工具包
-
-- [Node.js](https://nodejs.org/zh-cn)
-
-**.NET 9 Runtime required**
-
-- **Windows**: [.NET Desktop Runtime 9.0](https://dotnet.microsoft.com/download/dotnet/9.0)
-- **Linux / Mac**: [.NET Runtime 9.0](https://dotnet.microsoft.com/download/dotnet/9.0)
+- **Node.js**
+  - 需要勾选额外工具包
+  - [Node.js](https://nodejs.org/zh-cn)
+- **.NET 9 Runtime required**
+  - **Windows**: [.NET Desktop Runtime 9.0](https://dotnet.microsoft.com/download/dotnet/9.0)
+  - **Linux / Mac**: [.NET Runtime 9.0](https://dotnet.microsoft.com/download/dotnet/9.0)
 
 
 ```shell
