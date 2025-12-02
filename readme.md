@@ -8,13 +8,29 @@
 
 位置在`Android/data/jp.co.craftegg.band/files/Unity/很长一串/Analytics/values`
 
+2025年12月01日更新: 02022.3.62f1
+
 ### 关于版本号后的哈希值
 
 最简单的获取办法就是直接抓包，看host为content.garupa.jp的get
 
+根据经验，版本号前三位不变时，哈希值不变
+
 ### 初始化
 
-请确保已安装[Node.js](https://nodejs.org/zh-cn)
+请确保已安装
+
+**Node.js**
+
+需要勾选额外工具包
+
+- [Node.js](https://nodejs.org/zh-cn)
+
+**.NET 9 Runtime required**
+
+- **Windows**: [.NET Desktop Runtime 9.0](https://dotnet.microsoft.com/download/dotnet/9.0)
+- **Linux / Mac**: [.NET Runtime 9.0](https://dotnet.microsoft.com/download/dotnet/9.0)
+
 
 ```shell
 # 安装 yarn
