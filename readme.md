@@ -8,7 +8,7 @@
 
 位置在`Android/data/jp.co.craftegg.band/files/Unity/很长一串/Analytics/values`
 
-2025年12月01日更新: 02022.3.62f1
+2025年12月01日更新: `2022.3.62f1`
 
 ### 关于版本号后的哈希值
 
