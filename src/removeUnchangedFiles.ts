@@ -150,10 +150,14 @@ export async function removeUnchangedFiles(
                 console.log(`内容已变 → ${rel}`);
                 changedFiles.push(newPath);
             }
+
         })
     );
 
     await Promise.all(tasks);
+
+    console.log("清理旧文件夹...");
+    if (removeOld) await fsp.rm(change_old, {recursive: true, force: true});
 
     // 清理空文件夹
     console.log("清理空文件夹...");

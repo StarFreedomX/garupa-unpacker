@@ -8,11 +8,33 @@ import { mergeAllSegmentedAcbFiles } from "@/mergeBytes.js";
 import { decodeLatestAssets } from "@/decodeAcb.js";
 import { flatFolder } from "@/flatFolder.js";
 import path from "path";
+import dotenv from "dotenv";
+import fs from "node:fs";
+
+dotenv.config();
 
 const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '..');
+
+const envPath = path.resolve(__dirname, "../.env");
+const examplePath = path.resolve(__dirname, "../.env.example");
+
+// 优先使用 .env，没有就自动 fallback 到 .env.example
+if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath });
+    console.log("Loaded: .env");
+} else if (fs.existsSync(examplePath)) {
+    dotenv.config({ path: examplePath });
+    console.log("Loaded: .env.example");
+} else {
+    console.warn("Warning: No .env or .env.example found.");
+}
+
+const REMOVE_OLD_FILES = process.env.REMOVE_OLD_FILES!;
+const REMOVE_ANALYSING_FILES = process.env.REMOVE_ANALYSING_FILES!;
+
 
 async function main() {
     console.log('正在执行完整流程......')
@@ -69,7 +91,8 @@ async function main() {
     if (categoryFolders.includes("change") && categoryFolders.includes("change_old")) {
         await removeUnchangedFiles(
             path.join(output, "change_old"),
-            path.join(output, "change")
+            path.join(output, "change"),
+            REMOVE_OLD_FILES === 'true'
         );
     } else {
         console.log("未找到 change/change_old 文件夹，跳过比较。");
@@ -91,6 +114,12 @@ async function main() {
     await flatFolder(output)
 
     console.log('─'.repeat(60));
+
+    if (REMOVE_ANALYSING_FILES === 'true') {
+        console.log('清理中间文件中...')
+        await fs.promises.rm(getDefaultPaths().input, { recursive: true, force: true });
+        console.log('─'.repeat(60));
+    }
 
     console.log('解包完成')
 
