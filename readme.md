@@ -47,6 +47,14 @@ yarn install
 yarn grp
 ```
 
+### 常见资源路径
+
+* 卡牌颜色: `assets\9.4.0.120\new.assets.star.forassetbundle.asneeded.genericanimation\dream_festival_2512\name_text.png`
+* 新曲: `assets\9.4.0.120\new.assets.star.forassetbundle.asneeded\sound\ingamebgm`
+* 表情: `assets\9.4.0.120\change.assets.star.forassetbundle\startapp\stamp`
+* 语音表情: `assets\9.4.0.120\change.assets.star.forassetbundle\startapp\sound.voice`
+* 活动介绍: `assets\9.4.0.120\new.assets.star.forassetbundle.asneeded\event\challengeevent.new_year_2026\slide`
+
 ### 解包步骤流程：
 ```shell
 # download AssetBundleInfo
