@@ -21,12 +21,12 @@
   "dependencies": {
     "@types/node": "^24.10.1",
     "acb": "^2.1.0",
-    "axios": "^1.13.2",
+    "axios": "1.13.5",
     "dotenv": "^17.2.3",
     "execa": "^9.6.0",
     "glob": "^13.0.0",
     "hca-decoder": "^1.6.0",
-    "node-asset-studio-mod": "^1.0.2",
+    "node-asset-studio-mod": "^1.0.4",
     "p-limit": "^7.2.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"

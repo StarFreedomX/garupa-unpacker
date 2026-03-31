@@ -10,6 +10,7 @@ import { flatFolder } from "@/flatFolder.js";
 import path from "path";
 import dotenv from "dotenv";
 import fs from "node:fs";
+import axios, { AxiosError } from "axios";
 
 dotenv.config();
 
@@ -48,8 +49,43 @@ async function main() {
 
     const inputQ1 = await rl.question("请输入 AssetBundleInfo URL或版本号（留空自动检测更新）：\n> ");
 
+    let result: { version: string, filePath: string, url: string };
+    while (true) {
+        try {
+            // const TARGET_URL = 'https://content.garupa.jp/Release/9.4.0.170_9b65fe761fdb81f51e8120fd5d1c90b0961c3b8845e1430a77c268a66f1e4015/Android/sound/voice_stamp';
+            // const response = await axios.get(TARGET_URL);
+            result = await downloadAB(inputQ1 || undefined);
+            break; // 成功则跳出循环
+        } catch (err) {
+            if (axios.isAxiosError(err)) {
+                const statusCode = err.response?.status;
+                if (statusCode === 403) {
+                    console.warn("403 Forbidden: 权限或频率受限，5秒后重试...");
+                    await new Promise(resolve => setTimeout(resolve, 1000 * 20));
+                    continue;
+                }
+                if (statusCode === 429) {
+                    console.warn("429 Too Many Requests: 触发限流，60秒后重试...");
+                    await new Promise(resolve => setTimeout(resolve, 1000 * 60));
+                    continue;
+                }
 
-    const result = await downloadAB(inputQ1 || undefined);
+                // 如果是其他 4xx 错误（如 404），通常重试无意义，直接抛出
+                if (statusCode && statusCode >= 400 && statusCode < 500) {
+                    console.error(`客户端错误 ${statusCode}，放弃重试`);
+                    throw err;
+                }
+
+                // 如果是 5xx 错误或网络超时
+                console.log(`网络或服务器错误 (${statusCode || 'TIMEOUT'})，10秒后重试...`);
+                await new Promise(resolve => setTimeout(resolve, 1000 * 10));
+                continue;
+            }
+
+            // 非 Axios 错误（如代码逻辑错误），直接抛出
+            throw err;
+        }
+    }
     console.log(`下载AssetBundleInfo完成: ${result.filePath}`);
 
     console.log('─'.repeat(60));

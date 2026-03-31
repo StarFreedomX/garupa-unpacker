@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { fileURLToPath } from "url";
 
 const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
@@ -137,6 +137,10 @@ export async function downloadAB(inputAssetBundlePath?: string) {
             downloaded = true;
             console.log(`已保存: ${finalPath}`);
         } catch (err) {
+            if (err instanceof AxiosError){
+                console.error(err.message);
+                throw err;
+            }
             throw new Error(`下载失败: ${(err as any).message}`);
         }
     }
@@ -146,8 +150,21 @@ export async function downloadAB(inputAssetBundlePath?: string) {
         urlMap[version] = url;
 
         // 按版本名逆序排序
+        // 按版本号语义化逆序排序
         const sorted = Object.fromEntries(
-            Object.entries(urlMap).sort((a, b) => b[0].localeCompare(a[0]))
+            Object.entries(urlMap).sort((a, b) => {
+                const partsA = a[0].split('.').map(Number);
+                const partsB = b[0].split('.').map(Number);
+
+                for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+                    const numA = partsA[i] || 0;
+                    const numB = partsB[i] || 0;
+                    if (numA !== numB) {
+                        return numB - numA; // 逆序：大的在前
+                    }
+                }
+                return 0;
+            })
         );
 
         await fs.writeFile(JSON_PATH, JSON.stringify(sorted, null, 2), "utf-8");
