@@ -12,7 +12,8 @@
     "da": "npx tsx ./src/decodeAcb.ts",
     "mb": "npx tsx ./src/mergeBytes.ts",
     "ff": "npx tsx ./src/flatFolder.ts",
-    "grp": "npx tsx ./src/index.ts"
+    "grp": "npx tsx ./src/index.ts",
+    "gen:proto": "pbjs -t static-module -w es6 -o proto/gen/CE.js proto/CE.proto && pbts -o proto/gen/CE.d.ts proto/gen/CE.js"
   },
   "keywords": [],
   "author": "",
@@ -20,15 +21,22 @@
   "type": "module",
   "dependencies": {
     "@types/node": "^24.10.1",
+    "@types/protobufjs": "^6.0.0",
     "acb": "^2.1.0",
     "axios": "1.13.5",
     "dotenv": "^17.2.3",
     "execa": "^9.6.0",
     "glob": "^13.0.0",
     "hca-decoder": "^1.6.0",
+    "long": "^5.3.2",
     "node-asset-studio-mod": "^1.0.4",
     "p-limit": "^7.2.0",
+    "protobufjs": "^8.7.1",
+    "seek-bzip": "^2.0.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "protobufjs-cli": "^2.6.1"
   }
 }

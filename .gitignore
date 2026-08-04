@@ -11,3 +11,5 @@
 /dist/
 /pnpm-workspace.yaml
 /yarn.lock
+/out/
+/proto/gen/
