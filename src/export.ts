@@ -47,8 +47,8 @@ export function getLatestVersionFolder(baseDir: string): string | null {
 /**
  * 获取默认输入输出路径
  */
-export function getDefaultPaths(): { input: string; output: string } {
-    const latestVersion = getLatestVersionFolder(ANALYSING_DIR);
+export function getDefaultPaths(version?: string): { input: string; output: string } {
+    const latestVersion = version ?? getLatestVersionFolder(ANALYSING_DIR);
     if (!latestVersion) throw new Error(`analysing/ 下没有可用版本文件夹`);
 
     const input = path.join(ANALYSING_DIR, latestVersion);
@@ -75,8 +75,8 @@ export function getCategoryPaths(input: string): string[] {
 /**
  * 使用 AssetExporter 对象导出资源
  */
-export async function exportLatestAssets(config?: Partial<ExportAssetsDefaultConfig>) {
-    const { input, output } = getDefaultPaths();
+export async function exportLatestAssets(config?: Partial<ExportAssetsDefaultConfig>, version?: string) {
+    const { input, output } = getDefaultPaths(version);
 
     // 新建对象
     const exporter = new AssetExporter({

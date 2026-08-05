@@ -93,14 +93,13 @@ async function main() {
     console.log('对比文件中...');
     let outFile: string, summary: {added: number, changed: number}, versions: {verOld: string, verNew: string};
     try {
-        ({outFile, summary, versions} = await compareVersions());
+        ({outFile, summary, versions} = await compareVersions(result.version));
     }catch(err) {
         const inputQ2 = await rl.question("未找到已下载版本，请输入被比较的另一版本：\n> ");
-        const result = await downloadAB(inputQ2 || undefined);
-        console.log(`下载AssetBundleInfo完成: ${result.filePath}`);
+        await downloadAB(inputQ2 || undefined);
         console.log('─'.repeat(60));
         console.log('对比文件中...');
-        ({outFile, summary, versions} = await compareVersions());
+        ({outFile, summary, versions} = await compareVersions(result.version));
     }
 
     console.log(`\n✔ 对比完成: ${versions.verOld} → ${versions.verNew}`);
@@ -111,17 +110,17 @@ async function main() {
     console.log('─'.repeat(60));
 
     console.log('下载更改的文件...');
-    await downloadDiffAssets(PROJECT_ROOT);
+    await downloadDiffAssets(PROJECT_ROOT, outFile);
 
     console.log('─'.repeat(60));
 
     console.log('开始进行解包...');
-    await exportLatestAssets();
+    await exportLatestAssets(undefined, versions.verNew);
 
     console.log('─'.repeat(60));
 
     console.log('文件去重中...')
-    const {input, output} = getDefaultPaths();
+    const {input, output} = getDefaultPaths(versions.verNew);
     const categoryFolders = getCategoryPaths(input);
     // 处理 change 与 change_old
     if (categoryFolders.includes("change") && categoryFolders.includes("change_old")) {
@@ -142,7 +141,7 @@ async function main() {
     console.log('─'.repeat(60));
 
     console.log('解析acb文件...');
-    await decodeLatestAssets();
+    await decodeLatestAssets(versions.verNew);
 
     console.log('─'.repeat(60));
 
@@ -153,7 +152,7 @@ async function main() {
 
     if (REMOVE_ANALYSING_FILES === 'true') {
         console.log('清理中间文件中...')
-        await fs.promises.rm(getDefaultPaths().input, { recursive: true, force: true });
+        await fs.promises.rm(getDefaultPaths(versions.verNew).input, { recursive: true, force: true });
         console.log('─'.repeat(60));
     }
 

@@ -113,7 +113,7 @@ async function dedupeWavPair(changeOutDir: string, oldOutDir: string): Promise<v
 
 /** 主函数 */
 export async function decodeAssets(version?: string): Promise<void> {
-    const { output } = getDefaultPaths();
+    const { output } = getDefaultPaths(version);
     const categories = getCategoryPaths(output);
 
     let newDir: string | null = null;
@@ -121,10 +121,9 @@ export async function decodeAssets(version?: string): Promise<void> {
     let changeOldDir: string | null = null;
 
     if (version) {
-        const base = path.join(output, version);
-        newDir = categories.includes('new') ? path.join(base, 'new') : null;
-        changeDir = categories.includes('change') ? path.join(base, 'change') : null;
-        changeOldDir = categories.includes('change_old') ? path.join(base, 'change_old') : null;
+        newDir = categories.includes('new') ? path.join(output, 'new') : null;
+        changeDir = categories.includes('change') ? path.join(output, 'change') : null;
+        changeOldDir = categories.includes('change_old') ? path.join(output, 'change_old') : null;
         console.log(`开始解析指定版本: ${version}\n`);
     } else {
         newDir = categories.includes('new') ? path.join(output, 'new') : null;
@@ -173,8 +172,8 @@ export async function decodeAssets(version?: string): Promise<void> {
     console.log('\ncomplete.');
 }
 
-export async function decodeLatestAssets(): Promise<void> {
-    await decodeAssets();
+export async function decodeLatestAssets(version?: string): Promise<void> {
+    await decodeAssets(version);
 }
 
 if (isMainProcess) {

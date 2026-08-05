@@ -123,7 +123,7 @@ async function downloadFile(
     return false;
 }
 
-export async function downloadDiffAssets(PROJECT_ROOT: string): Promise<void> {
+export async function downloadDiffAssets(PROJECT_ROOT: string, diffFile?: string): Promise<void> {
 
     // AssetBundleInfo下载地址的json文件路径
     const FULL_URL_JSON_PATH = path.join(PROJECT_ROOT, URL_JSON_NAME);
@@ -135,12 +135,12 @@ export async function downloadDiffAssets(PROJECT_ROOT: string): Promise<void> {
     console.log(`读取版本 URL 映射: ${FULL_URL_JSON_PATH}`);
     const urlMap = JSON.parse(await fs.readFile(FULL_URL_JSON_PATH, "utf-8"));
 
-    // 最新的diff文件路径
-    const diffFile = await getLatestDiffByVersion(FULL_DIFF_DIR);
-    console.log(`使用最新差异文件：${path.basename(diffFile)}`);
+    // 优先使用本次传入的 diff，未传时回退到最新的 diff
+    const resolvedDiffFile = diffFile ?? await getLatestDiffByVersion(FULL_DIFF_DIR);
+    console.log(`使用差异文件：${path.basename(resolvedDiffFile)}`);
 
     // 正则匹配
-    const match = diffFile.match(/diff_(\d+\.\d+\.\d+\.\d+)_to_(\d+\.\d+\.\d+\.\d+)\.json$/);
+    const match = resolvedDiffFile.match(/diff_(\d+\.\d+\.\d+\.\d+)_to_(\d+\.\d+\.\d+\.\d+)\.json$/);
     if (!match) throw new Error("diff 文件格式错误!");
 
     const oldVersion = match[1];
@@ -149,14 +149,19 @@ export async function downloadDiffAssets(PROJECT_ROOT: string): Promise<void> {
     console.log(`旧版本: ${oldVersion}`);
     console.log(`新版本: ${newVersion}`);
 
-    const diffJson: {"new": string[], "change": string[]} = JSON.parse(await fs.readFile(diffFile, "utf8"));
+    const diffJson: {"new": string[], "change": string[]} = JSON.parse(await fs.readFile(resolvedDiffFile, "utf8"));
 
     const axiosInstance = axios.create({
         timeout: TIMEOUT_MS,
         headers: HEADERS
     });
-    const baseUrlNew = extractPrefix(urlMap[newVersion]);
-    const baseUrlOld = extractPrefix(urlMap[oldVersion]);
+    const urlNew = urlMap[newVersion];
+    const urlOld = urlMap[oldVersion];
+    if (!urlNew) throw new Error(`urlMap 缺少新版本 ${newVersion} 的 URL，请先用版本号下载该版本`);
+    if (!urlOld) throw new Error(`urlMap 缺少旧版本 ${oldVersion} 的 URL，请先用版本号下载该版本`);
+
+    const baseUrlNew = extractPrefix(urlNew);
+    const baseUrlOld = extractPrefix(urlOld);
 
     const newRoot = path.join(FULL_ASSETS_DIR, newVersion);
     const dirNew = path.join(newRoot, "new");
