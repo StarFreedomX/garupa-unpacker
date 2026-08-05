@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import axios, { AxiosInstance } from 'axios';
 import { glob } from 'glob';
 import pLimit from 'p-limit';
+import { mainVersion, buildAssetBundleUrl, loadStore } from "@/garupa/assetBundleInfo.js";
 const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
 
 const MAX_CONCURRENT_DOWNLOADS = 10;
@@ -123,7 +124,7 @@ async function downloadFile(
     return false;
 }
 
-export async function downloadDiffAssets(PROJECT_ROOT: string, diffFile?: string): Promise<void> {
+export async function downloadDiffAssets(PROJECT_ROOT: string, diffFile?: string): Promise<{ total: number; failed: number }> {
 
     // AssetBundleInfo下载地址的json文件路径
     const FULL_URL_JSON_PATH = path.join(PROJECT_ROOT, URL_JSON_NAME);
@@ -132,8 +133,7 @@ export async function downloadDiffAssets(PROJECT_ROOT: string, diffFile?: string
     // 导出的assets路径
     const FULL_ASSETS_DIR = path.join(PROJECT_ROOT, ASSETS_DIR_NAME);
 
-    console.log(`读取版本 URL 映射: ${FULL_URL_JSON_PATH}`);
-    const urlMap = JSON.parse(await fs.readFile(FULL_URL_JSON_PATH, "utf-8"));
+    const store = await loadStore(FULL_URL_JSON_PATH);
 
     // 优先使用本次传入的 diff，未传时回退到最新的 diff
     const resolvedDiffFile = diffFile ?? await getLatestDiffByVersion(FULL_DIFF_DIR);
@@ -155,13 +155,13 @@ export async function downloadDiffAssets(PROJECT_ROOT: string, diffFile?: string
         timeout: TIMEOUT_MS,
         headers: HEADERS
     });
-    const urlNew = urlMap[newVersion];
-    const urlOld = urlMap[oldVersion];
-    if (!urlNew) throw new Error(`urlMap 缺少新版本 ${newVersion} 的 URL，请先用版本号下载该版本`);
-    if (!urlOld) throw new Error(`urlMap 缺少旧版本 ${oldVersion} 的 URL，请先用版本号下载该版本`);
+    const hashNew = store.hashes[mainVersion(newVersion)];
+    const hashOld = store.hashes[mainVersion(oldVersion)];
+    if (!hashNew) throw new Error(`hashes 缺少主版本 ${mainVersion(newVersion)} 的 hash，请先运行 downloadAssetBundleInfo 粘贴一次该主版本 URL`);
+    if (!hashOld) throw new Error(`hashes 缺少主版本 ${mainVersion(oldVersion)} 的 hash，请先运行 downloadAssetBundleInfo 粘贴一次该主版本 URL`);
 
-    const baseUrlNew = extractPrefix(urlNew);
-    const baseUrlOld = extractPrefix(urlOld);
+    const baseUrlNew = extractPrefix(buildAssetBundleUrl(newVersion, hashNew));
+    const baseUrlOld = extractPrefix(buildAssetBundleUrl(oldVersion, hashOld));
 
     const newRoot = path.join(FULL_ASSETS_DIR, newVersion);
     const dirNew = path.join(newRoot, "new");
@@ -182,9 +182,12 @@ export async function downloadDiffAssets(PROJECT_ROOT: string, diffFile?: string
 
     console.log(`开始下载 NEW(${diffJson.new.length}) + CHANGE(${diffJson.change.length * 2}) ...\n`);
 
-    await Promise.all(tasks);
+    const results = await Promise.all(tasks);
+    const failed = results.filter(r => !r).length;
 
-    console.log(`下载完成 -> assets/${newVersion}/`);
+    console.log(`下载完成 -> assets/${newVersion}/（成功 ${results.length - failed}/${results.length}）`);
+
+    return { total: results.length, failed };
 }
 
 

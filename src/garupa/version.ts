@@ -44,3 +44,15 @@ export async function getDataVersion(): Promise<string> {
     const app = await fetchApplication();
     return app.dataVersion;
 }
+
+/**
+ * 获取游戏侧最新版本记录（/application 的 client/data/masterData 版本）。
+ */
+export async function getAppVersions(): Promise<{ clientVersion: string; dataVersion: string; masterDataVersion: string }> {
+    const app = await fetchApplication();
+    return {
+        clientVersion: app.clientVersion,
+        dataVersion: app.dataVersion,
+        masterDataVersion: app.masterDataVersion,
+    };
+}

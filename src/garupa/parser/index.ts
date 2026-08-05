@@ -46,21 +46,25 @@ export function decodeSuiteMaster(data: Uint8Array): Record<string, any> {
 
 /**
  * 解码 AppGetResponse。
- * 响应尾部约有 2 个多余字节，会使严格解码抛 "invalid wire type"；
- * 故从尾部逐字节裁剪（1..16）重试，直到解码成功。
+ * 响应为 AES-128-CBC 解密（无自动去填充）后，尾部带 ISO 10126 填充：
+ * 最后一位字节 = 填充长度（如 0x02），其余填充字节随机。
+ * 直接按末尾字节裁剪；若填充长度非法或裁剪后解码失败，回退逐字节试错（0..16）。
  */
 export function decodeAppGet(data: Uint8Array): any {
-    try {
-        return decodeStrict(CE.AppGetResponse, data);
-    } catch {
-        let lastError: unknown;
-        for (let trim = 1; trim <= 16; trim++) {
-            try {
-                return decodeStrict(CE.AppGetResponse, data.subarray(0, data.length - trim));
-            } catch (err) {
-                lastError = err;
-            }
-        }
-        throw lastError;
+    const padLen = data.length > 0 ? data[data.length - 1] : 0;
+    if (padLen >= 1 && padLen <= 16) {
+        try {
+            return decodeStrict(CE.AppGetResponse, data.subarray(0, data.length - padLen));
+        } catch { /* 填充长度异常，回退试错 */ }
     }
+
+    let lastError: unknown;
+    for (let trim = 0; trim <= 16; trim++) {
+        try {
+            return decodeStrict(CE.AppGetResponse, data.subarray(0, data.length - trim));
+        } catch (err) {
+            lastError = err;
+        }
+    }
+    throw lastError;
 }

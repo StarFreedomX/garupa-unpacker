@@ -9,6 +9,7 @@ import * as path from "path";
 import axios from "axios";
 import { fileURLToPath } from "url";
 import { AssetExporter } from "node-asset-studio-mod";
+import { mainVersion, buildAssetBundleUrl, loadStore } from "./garupa/assetBundleInfo.js";
 
 dotenv.config();
 
@@ -77,18 +78,13 @@ async function main() {
 
     console.log(`目标: BGM ${bgmNumber} (曲${bgmNumber})`);
 
-    // 1. 读取 URL 映射
-    const urlMap: Record<string, string> = JSON.parse(fs.readFileSync(URL_JSON_PATH, "utf-8"));
-    const versions = Object.keys(urlMap).sort((a, b) => {
-        const [a1, a2, a3, a4] = a.split(".").map(Number);
-        const [b1, b2, b3, b4] = b.split(".").map(Number);
-        if (a1 !== b1) return b1 - a1;
-        if (a2 !== b2) return b2 - a2;
-        if (a3 !== b3) return b3 - a3;
-        return b4 - a4;
-    });
-    const latestVersion = versions[0];
-    const baseUrl = extractPrefix(urlMap[latestVersion]);
+    // 1. 读取版本记录，取 latest.dataVersion 作为最新版本
+    const store = await loadStore(URL_JSON_PATH);
+    const latestVersion = store.latest.dataVersion;
+    if (!latestVersion) throw new Error("AssetBundleInfoUrl.json 缺少 latest.dataVersion，请先运行 downloadAssetBundleInfo 自动检测一次");
+    const hash = store.hashes[mainVersion(latestVersion)];
+    if (!hash) throw new Error(`hashes 缺少主版本 ${mainVersion(latestVersion)} 的 hash，请先运行 downloadAssetBundleInfo 粘贴一次该主版本 URL`);
+    const baseUrl = extractPrefix(buildAssetBundleUrl(latestVersion, hash));
     console.log(`使用版本: ${latestVersion}`);
     console.log(`CDN 前缀: ${baseUrl}`);
 

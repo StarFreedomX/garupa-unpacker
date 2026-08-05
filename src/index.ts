@@ -105,12 +105,20 @@ async function main() {
     console.log(`\n✔ 对比完成: ${versions.verOld} → ${versions.verNew}`);
     console.log(`新增: ${summary.added}, 修改: ${summary.changed}`);
     console.log(`结果已保存到: ${outFile}`);
-    rl.close();
 
     console.log('─'.repeat(60));
 
     console.log('下载更改的文件...');
-    await downloadDiffAssets(PROJECT_ROOT, outFile);
+    const dlResult = await downloadDiffAssets(PROJECT_ROOT, outFile);
+    if (dlResult.failed > 0) {
+        console.warn(`⚠ 下载失败 ${dlResult.failed}/${dlResult.total} 个文件（可能新版本资源未就绪）`);
+        const ans = await rl.question("是否用已下载部分继续？（重跑时会自动续传缺失文件）[y/N]: ");
+        if (!/^y/i.test(ans.trim())) {
+            console.log("已中止。已下载部分保留在 analysing/，重跑即续传。");
+            rl.close();
+            return;
+        }
+    }
 
     console.log('─'.repeat(60));
 
@@ -155,6 +163,8 @@ async function main() {
         await fs.promises.rm(getDefaultPaths(versions.verNew).input, { recursive: true, force: true });
         console.log('─'.repeat(60));
     }
+
+    rl.close();
 
     console.log('解包完成')
 

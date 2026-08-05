@@ -2,7 +2,11 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import axios, { AxiosError } from 'axios';
 import { fileURLToPath } from "url";
-import { getDataVersion } from './garupa/version.js';
+import {
+    mainVersion, buildAssetBundleUrl, extractVersionFromUrl, extractHashFromUrl,
+    ensureTimestamp, loadStore, saveStore,
+} from "./garupa/assetBundleInfo.js";
+import { getAppVersions } from "./garupa/version.js";
 
 const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
 
@@ -10,42 +14,9 @@ const JSON_PATH = "AssetBundleInfoUrl.json";
 const BASE_NAME = "AssetBundleInfo";
 const OUT_DIR = BASE_NAME;
 
-/** 从 URL 提取版本号 */
-function extractVersion(url: string): string | null {
-    const match = url.match(/\/Release\/(\d+\.\d+\.\d+\.\d+)/);
-    return match ? match[1] : null;
-}
-
 /** 输入是否为纯版本号 9.3.0.210 */
 function isVersionFormat(input: string): boolean {
     return /^\d+\.\d+\.\d+\.\d+$/.test(input);
-}
-
-/** 取版本前三段：9.3.0 */
-function mainVersion(version: string) {
-    return version.split(".").slice(0, 3).join(".");
-}
-
-/** 给 URL 加时间戳避免 403 */
-function ensureTimestamp(url: string): string {
-    if (url.includes("t=")) return url;
-    const sep = url.includes("?") ? "&" : "?";
-    const stamp = new Date().toISOString().replace(/[-T:.Z]/g, "").slice(0, 14);
-    return `${url}${sep}t=${stamp}`;
-}
-
-
-
-/** 根据输入版本号 在 JSON 中找到同主版本 的模板 URL */
-function findTemplateUrl(version: string, urlMap: Record<string,string>): string | null {
-    const targetMain = mainVersion(version);
-
-    for (const v in urlMap) {
-        if (mainVersion(v) === targetMain) {
-            return urlMap[v];
-        }
-    }
-    return null;
 }
 
 /**
@@ -56,52 +27,65 @@ export async function downloadAB(inputAssetBundlePath?: string) {
     inputAssetBundlePath = inputAssetBundlePath?.trim();
     let url = "";
     let version = "";
-    let urlMap: Record<string, string> = {};
+    let learnedHash: string | null = null;
 
-    // 读取历史 JSON
-    try {
-        urlMap = JSON.parse(await fs.readFile(JSON_PATH, "utf-8"));
-    } catch {}
+    // 读取存储（兼容旧格式自动迁移）
+    const store = await loadStore(JSON_PATH);
 
     // 输入了内容
     if (inputAssetBundlePath) {
         // 输入的是版本号（非 URL）
         if (isVersionFormat(inputAssetBundlePath)) {
             version = inputAssetBundlePath;
-            const template = findTemplateUrl(version, urlMap);
-
-            if (!template)
-                throw new Error(`无法在 JSON 中找到与 ${version} 主版本 (${mainVersion(version)}) 匹配的模板 URL！`);
-
-            // 去掉旧时间戳
-            const clean = template.replace(/\?t=\d+$/, "");
-            // 替换版本号
-            url = ensureTimestamp(clean.replace(/Release\/\d+\.\d+\.\d+\.\d+/, `Release/${version}`));
-
-            console.log(`使用版本号模式 → 主版本模板匹配成功`);
+            const main = mainVersion(version);
+            const hash = store.hashes[main];
+            if (!hash)
+                throw new Error(`hashes 中缺少主版本 ${main} 的 hash，请先粘贴一次该主版本的完整 AssetBundleInfo URL 以自动记录`);
+            url = ensureTimestamp(buildAssetBundleUrl(version, hash));
+            console.log(`使用版本号模式 → 主版本 ${main} 匹配成功`);
             console.log(`构造 URL: ${url}`);
         }
-        // 输入的是真 URL
+        // 输入的是真 URL → 学习该主版本的 hash（自动更新记录）
         else {
             url = ensureTimestamp(inputAssetBundlePath);
-            const extracted = extractVersion(url);
+            const extracted = extractVersionFromUrl(url);
             if (!extracted) throw new Error("无法识别 URL 中的版本号！");
             version = extracted;
-
+            learnedHash = extractHashFromUrl(url);
             console.log(`手动 URL 模式 → 版本: ${version}`);
         }
     }
-
-    // 未输入 → 从游戏 API 自动检测最新版本（application.dataVersion）
+    // 未输入 → 从游戏 API 自动检测最新版本
     else {
-        version = await getDataVersion();
-        const template = findTemplateUrl(version, urlMap);
-        if (!template)
-            throw new Error(`无法在 JSON 中找到与 ${version} 主版本 (${mainVersion(version)}) 匹配的模板 URL！`);
-        const clean = template.replace(/\?t=\d+$/, "");
-        url = ensureTimestamp(clean.replace(/Release\/\d+\.\d+\.\d+\.\d+/, `Release/${version}`));
+        const app = await getAppVersions();
+        version = app.dataVersion;
+        store.latest = {
+            clientVersion: app.clientVersion,
+            dataVersion: app.dataVersion,
+            masterDataVersion: app.masterDataVersion,
+        };
+        const main = mainVersion(version);
+        const hash = store.hashes[main];
+        if (!hash)
+            throw new Error(`hashes 中缺少主版本 ${main} 的 hash，请先粘贴一次该主版本的完整 AssetBundleInfo URL 以自动记录`);
+        url = ensureTimestamp(buildAssetBundleUrl(version, hash));
         console.log(`自动检测最新版本 → ${version}`);
         console.log(`构造 URL: ${url}`);
+    }
+
+    // 手动输入时也尽力刷新 latest 记录（失败不影响本次下载）
+    let dirty = learnedHash !== null;
+    if (!("dataVersion" in store.latest) || store.latest.dataVersion === undefined) dirty = true;
+    if (!("dataVersion" in store.latest && store.latest.dataVersion === version)) {
+        try {
+            const app = await getAppVersions();
+            store.latest = {
+                clientVersion: app.clientVersion,
+                dataVersion: app.dataVersion,
+                masterDataVersion: app.masterDataVersion,
+            };
+            dirty = true;
+        } catch { /* 保持旧 latest 记录 */ }
     }
 
     // 保存路径
@@ -109,7 +93,6 @@ export async function downloadAB(inputAssetBundlePath?: string) {
     await fs.mkdir(OUT_DIR, { recursive: true });
 
     let downloaded = false;
-
     // 如果已有文件 → 跳过
     try {
         await fs.access(finalPath);
@@ -125,7 +108,7 @@ export async function downloadAB(inputAssetBundlePath?: string) {
             downloaded = true;
             console.log(`已保存: ${finalPath}`);
         } catch (err) {
-            if (err instanceof AxiosError){
+            if (err instanceof AxiosError) {
                 console.error(err.message);
                 throw err;
             }
@@ -133,29 +116,15 @@ export async function downloadAB(inputAssetBundlePath?: string) {
         }
     }
 
-    // 更新 JSON
-    if (downloaded) {
-        urlMap[version] = url;
+    // 学习到新 hash → 记录到 hashes
+    if (learnedHash) {
+        store.hashes[mainVersion(version)] = learnedHash;
+        dirty = true;
+    }
 
-        // 按版本名逆序排序
-        // 按版本号语义化逆序排序
-        const sorted = Object.fromEntries(
-            Object.entries(urlMap).sort((a, b) => {
-                const partsA = a[0].split('.').map(Number);
-                const partsB = b[0].split('.').map(Number);
-
-                for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-                    const numA = partsA[i] || 0;
-                    const numB = partsB[i] || 0;
-                    if (numA !== numB) {
-                        return numB - numA; // 逆序：大的在前
-                    }
-                }
-                return 0;
-            })
-        );
-
-        await fs.writeFile(JSON_PATH, JSON.stringify(sorted, null, 2), "utf-8");
+    // 有变化才写回 JSON
+    if (dirty) {
+        await saveStore(store, JSON_PATH);
         console.log(`URL 记录已更新: ${JSON_PATH}`);
     }
 
