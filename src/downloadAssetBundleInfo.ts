@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import axios, { AxiosError } from 'axios';
 import { fileURLToPath } from "url";
+import { getDataVersion } from './garupa/version.js';
 
 const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
 
@@ -31,18 +32,6 @@ function ensureTimestamp(url: string): string {
     const sep = url.includes("?") ? "&" : "?";
     const stamp = new Date().toISOString().replace(/[-T:.Z]/g, "").slice(0, 14);
     return `${url}${sep}t=${stamp}`;
-}
-
-/** 自动推测下一个版本号 */
-function incrementVersion(version: string): string {
-    const parts = version.split('.');
-    const lastNum = parts.pop();
-    if (!lastNum) throw new Error("Invalid version number");
-    let last = Number(lastNum);
-    // 90 → +20，否则 +10
-    last += last % 100 === 90 ? 20 : 10;
-    parts.push(last.toString());
-    return parts.join('.');
 }
 
 
@@ -103,17 +92,16 @@ export async function downloadAB(inputAssetBundlePath?: string) {
         }
     }
 
-    // 未输入 → 自动推测下一版本号
+    // 未输入 → 从游戏 API 自动检测最新版本（application.dataVersion）
     else {
-        const latest = Object.keys(urlMap)[0];
-        if (!latest) throw new Error("JSON 中无历史记录，无法自动生成 URL");
-
-        version = incrementVersion(latest);
-        const template = urlMap[latest].replace(/\?t=\d+$/, "");
-        url = ensureTimestamp(template.replace(latest, version));
-
-        console.log(`自动推测下一版本 → ${latest} → ${version}`);
-        console.log(`推测 URL: ${url}`);
+        version = await getDataVersion();
+        const template = findTemplateUrl(version, urlMap);
+        if (!template)
+            throw new Error(`无法在 JSON 中找到与 ${version} 主版本 (${mainVersion(version)}) 匹配的模板 URL！`);
+        const clean = template.replace(/\?t=\d+$/, "");
+        url = ensureTimestamp(clean.replace(/Release\/\d+\.\d+\.\d+\.\d+/, `Release/${version}`));
+        console.log(`自动检测最新版本 → ${version}`);
+        console.log(`构造 URL: ${url}`);
     }
 
     // 保存路径
