@@ -29,7 +29,7 @@ async function findValidAcbFiles(dir: string): Promise<string[]> {
 }
 
 /** 解单个 ACB 并返回输出目录路径 */
-async function decodeSingleAcb(
+export async function decodeSingleAcb(
     acbPath: string,
     deleteHca = true,
     deleteAcb = true,

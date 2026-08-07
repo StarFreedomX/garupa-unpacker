@@ -13,6 +13,7 @@
     "mb": "npx tsx ./src/mergeBytes.ts",
     "ff": "npx tsx ./src/flatFolder.ts",
     "grp": "npx tsx ./src/index.ts",
+    "quick": "npx tsx ./src/quickUnpack.ts",
     "gen:proto": "pbjs -t static-module -w es6 -o proto/gen/CE.js proto/CE.proto && pbts -o proto/gen/CE.d.ts proto/gen/CE.js"
   },
   "keywords": [],
