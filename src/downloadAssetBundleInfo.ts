@@ -3,10 +3,17 @@ import * as path from 'path';
 import axios, { AxiosError } from 'axios';
 import { fileURLToPath } from "url";
 import {
-    mainVersion, buildAssetBundleUrl, extractVersionFromUrl, extractHashFromUrl,
-    ensureTimestamp, loadStore, saveStore,
+    mainVersion, compareVersions, buildAssetBundleUrl, extractVersionFromUrl, extractHashFromUrl,
+    ensureTimestamp, loadStore, saveStore, recordSnapshot, findHashForDataVersion,
 } from "./garupa/assetBundleInfo.js";
+import type { AssetBundleInfoStore } from "./garupa/assetBundleInfo.js";
 import { getAppVersions } from "./garupa/version.js";
+import { extractApkCandidates } from "./garupa/apkHash.js";
+import { fetchApplication } from "./garupa/api/application.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = path.resolve(__dirname, "..");
+const APKS_DIR = path.join(PROJECT_ROOT, "apks");
 
 const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
 
@@ -20,6 +27,74 @@ function isVersionFormat(input: string): boolean {
 }
 
 /**
+ * 从 apks 目录的候选 APK 中，为指定 dataVersion 找 hash。
+ * 候选 APK 只含 clientVersion + hash；逐个用 /application 询问其真实 dataVersion，
+ * 命中目标 dataVersion 主版本线的候选即返回其 hash（最新 clientVersion 优先）。
+ * 网络失败 / 无候选 / 全部未命中 → null（不抛出）。
+ */
+export async function hashFromApksForDataVersion(store: AssetBundleInfoStore, version: string): Promise<string | null> {
+    let candidates: Array<{ apkName: string; clientVersion: string; hash: string }>;
+    try {
+        candidates = await extractApkCandidates(APKS_DIR);
+    } catch (err) {
+        console.warn(`从 apks 提取候选失败（忽略）: ${(err as Error).message}`);
+        return null;
+    }
+    if (candidates.length === 0) return null;
+
+    // 最新 clientVersion 优先（compareVersions 为逆序比较器，直接 sort 即最新在前）
+    candidates.sort((a, b) => compareVersions(a.clientVersion, b.clientVersion));
+
+    let snapshotChanged = false;
+    for (const c of candidates) {
+        // 已有快照则直接用其 dataVersion（省一次网络请求）
+        let dataVersion: string | undefined = store.snapshots[c.clientVersion]?.dataVersion;
+        if (!dataVersion) {
+            try {
+                const app = await fetchApplication(c.clientVersion);
+                dataVersion = app.dataVersion;
+                const masterDataVersion = app.masterDataVersion;
+                snapshotChanged = recordSnapshot(store, c.clientVersion, { dataVersion, masterDataVersion }) || snapshotChanged;
+            } catch {
+                dataVersion = undefined;
+            }
+        }
+        if (dataVersion && mainVersion(dataVersion) === mainVersion(version)) {
+            snapshotChanged = recordSnapshot(store, c.clientVersion, { hash: c.hash }) || snapshotChanged;
+            console.log(`apks 候选 ${c.apkName}（clientVersion ${c.clientVersion}）→ 服务器 dataVersion ${dataVersion}，命中主版本 ${mainVersion(version)}，使用其 hash`);
+            return c.hash;
+        }
+        // dataVersion 解析失败时仍把 hash 保留到 clientHashes（供将来快照补全后反查用），但无法确认归属 → 不返回
+        snapshotChanged = recordSnapshot(store, c.clientVersion, { hash: c.hash }) || snapshotChanged;
+    }
+    return null;
+}
+
+/**
+ * 刷新 /application → 更新 store.latest + snapshots；失败返回 null（不抛出）。
+ * 供 index.ts 一键流程起点一次性刷新用；downloadAB 只在「自动检测」分支内自行刷新。
+ */
+export async function refreshAppData(store: AssetBundleInfoStore): Promise<{ clientVersion: string; dataVersion: string; masterDataVersion: string } | null> {
+    try {
+        const app = await getAppVersions();
+        store.latest = {
+            clientVersion: app.clientVersion,
+            dataVersion: app.dataVersion,
+            masterDataVersion: app.masterDataVersion,
+        };
+        recordSnapshot(store, app.clientVersion, {
+            dataVersion: app.dataVersion,
+            masterDataVersion: app.masterDataVersion,
+        });
+        console.log(`已刷新 /application：client ${app.clientVersion} / data ${app.dataVersion}`);
+        return app;
+    } catch (err) {
+        console.warn(`刷新 /application 失败: ${(err as Error).message}`);
+        return null;
+    }
+}
+
+/**
  * 核心下载逻辑
  * @param inputAssetBundlePath URL 或版本号，例如 "9.3.0.200"
  */
@@ -28,19 +103,24 @@ export async function downloadAB(inputAssetBundlePath?: string) {
     let url = "";
     let version = "";
     let learnedHash: string | null = null;
+    let dirty = false;
 
-    // 读取存储（兼容旧格式自动迁移）
-    const store = await loadStore(JSON_PATH);
+    // 读取存储（兼容旧格式自动迁移 + clientHashes 结构升级）
+    const migrated = { value: false };
+    const store = await loadStore(JSON_PATH, migrated);
+    if (migrated.value) dirty = true; // 迁移推导出了 clientHashes → 需要落盘一次
 
     // 输入了内容
     if (inputAssetBundlePath) {
-        // 输入的是版本号（非 URL）
+        // 输入的是版本号（非 URL）——不刷新 /application，下载旧版本绝不能污染 latest
         if (isVersionFormat(inputAssetBundlePath)) {
             version = inputAssetBundlePath;
             const main = mainVersion(version);
-            const hash = store.hashes[main];
-            if (!hash)
-                throw new Error(`hashes 中缺少主版本 ${main} 的 hash，请先粘贴一次该主版本的完整 AssetBundleInfo URL 以自动记录`);
+            let hash = findHashForDataVersion(store, version);
+            if (!hash) hash = await hashFromApksForDataVersion(store, version);
+            if (!hash) {
+                throw new Error(`hashes 中缺少主版本 ${main} 的 hash，请先粘贴一次该主版本的完整 AssetBundleInfo URL 以自动记录，或放置对应版本的 .apk/.apks/.xapk 到 ${APKS_DIR}`);
+            }
             url = ensureTimestamp(buildAssetBundleUrl(version, hash));
             console.log(`使用版本号模式 → 主版本 ${main} 匹配成功`);
             console.log(`构造 URL: ${url}`);
@@ -55,38 +135,32 @@ export async function downloadAB(inputAssetBundlePath?: string) {
             console.log(`手动 URL 模式 → 版本: ${version}`);
         }
     }
-    // 未输入 → 从游戏 API 自动检测最新版本
+    // 未输入 → 刷新 application 拿云端最新 + 更新 latest/snapshots，再自动检测
     else {
         const app = await getAppVersions();
-        version = app.dataVersion;
         store.latest = {
             clientVersion: app.clientVersion,
             dataVersion: app.dataVersion,
             masterDataVersion: app.masterDataVersion,
         };
+        if (recordSnapshot(store, app.clientVersion, {
+            dataVersion: app.dataVersion,
+            masterDataVersion: app.masterDataVersion,
+        })) dirty = true;
+        console.log(`已刷新 /application：client ${app.clientVersion} / data ${app.dataVersion}`);
+        version = app.dataVersion;
         const main = mainVersion(version);
-        const hash = store.hashes[main];
-        if (!hash)
-            throw new Error(`hashes 中缺少主版本 ${main} 的 hash，请先粘贴一次该主版本的完整 AssetBundleInfo URL 以自动记录`);
+        let hash = findHashForDataVersion(store, version, app.clientVersion);
+        if (!hash) hash = await hashFromApksForDataVersion(store, version);
+        if (!hash) {
+            throw new Error(`hashes 中缺少主版本 ${main} 的 hash，请先粘贴一次该主版本的完整 AssetBundleInfo URL 以自动记录，或放置对应版本的 .apk/.apks/.xapk 到 ${APKS_DIR}`);
+        }
         url = ensureTimestamp(buildAssetBundleUrl(version, hash));
         console.log(`自动检测最新版本 → ${version}`);
         console.log(`构造 URL: ${url}`);
     }
 
-    // 手动输入时也尽力刷新 latest 记录（失败不影响本次下载）
-    let dirty = learnedHash !== null;
-    if (!("dataVersion" in store.latest) || store.latest.dataVersion === undefined) dirty = true;
-    if (!("dataVersion" in store.latest && store.latest.dataVersion === version)) {
-        try {
-            const app = await getAppVersions();
-            store.latest = {
-                clientVersion: app.clientVersion,
-                dataVersion: app.dataVersion,
-                masterDataVersion: app.masterDataVersion,
-            };
-            dirty = true;
-        } catch { /* 保持旧 latest 记录 */ }
-    }
+    if (learnedHash) dirty = true;
 
     // 保存路径
     const finalPath = path.join(OUT_DIR, `${BASE_NAME}_${version}.txt`);
@@ -116,9 +190,20 @@ export async function downloadAB(inputAssetBundlePath?: string) {
         }
     }
 
-    // 学习到新 hash → 记录到 hashes
+    // 学习到新 hash → 记录到 hashes（兼容层），并尝试补写 clientHashes（权威表）
     if (learnedHash) {
         store.hashes[mainVersion(version)] = learnedHash;
+        // 从 snapshots 找同 dataVersion 主版本线的 clientVersion 候选（最新优先），
+        // 找到则 clientHashes[cv] = learnedHash；找不到只写 hashes（不报错）
+        const line = mainVersion(version);
+        const cvCandidates = Object.entries(store.snapshots)
+            .filter(([, s]) => s.dataVersion && mainVersion(s.dataVersion) === line)
+            .map(([cv]) => cv)
+            .sort((a, b) => compareVersions(a, b));
+        if (cvCandidates.length > 0) {
+            store.clientHashes[cvCandidates[0]] = learnedHash;
+            console.log(`URL 学习 hash → 同时写入 clientHashes[${cvCandidates[0]}]`);
+        }
         dirty = true;
     }
 

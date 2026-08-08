@@ -8,19 +8,6 @@ const ASSET_DIR = "AssetBundleInfo";
 const OUT_DIR = "compare";
 
 type AssetMap = Map<string, string>;
-type VersionTuple = { baseVer: string; extraNum: number };
-type VersionFile = {
-    version: VersionTuple;
-    fileName: string;
-    versionKey: number[];
-    formattedVersion: string;
-};
-
-
-function extractVersionFromFilename(name: string): VersionTuple | null {
-    const match = name.match(/^AssetBundleInfo_(\d+\.\d+\.\d+\.\d+)\.txt$/);
-    return match ? { baseVer: match[1], extraNum: 1 } : null;
-}
 
 
 function extractPathAndHash(line: string) {
@@ -56,59 +43,47 @@ async function readFileToAssetMap(filePath: string): Promise<AssetMap> {
     return data;
 }
 
-function versionKey(v: VersionTuple): number[] {
-    return v.baseVer.split(".").map(n => Number(n));
+/** 点分版本号数字比较（升序：负数表示 a < b） */
+function compareVersionNumbers(a: string, b: string): number {
+    const pa = a.split(".").map(Number);
+    const pb = b.split(".").map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const na = pa[i] || 0;
+        const nb = pb[i] || 0;
+        if (na !== nb) return na - nb;
+    }
+    return 0;
 }
 
-
-function formatVersion(v: VersionTuple): string {
-    return v.extraNum > 1 ? `${v.baseVer}.${v.extraNum}` : v.baseVer;
+/** 列出 AssetBundleInfo/ 目录下已下载的版本号（升序排序） */
+export async function listDownloadedVersions(): Promise<string[]> {
+    const files = await fs.readdir(ASSET_DIR);
+    const versions = files
+        .map(f => f.match(/^AssetBundleInfo_(\d+\.\d+\.\d+\.\d+)\.txt$/)?.[1])
+        .filter((v): v is string => !!v);
+    versions.sort(compareVersionNumbers);
+    return versions;
 }
 
-export async function compareVersions(targetVersion?: string) {
-
-    const filesInDir = await fs.readdir(ASSET_DIR);
-
-    const versionFiles: VersionFile[] = filesInDir
-        .filter(f => f.endsWith(".txt"))
-        .map(fileName => {
-            const version = extractVersionFromFilename(fileName);
-            return version ? {
-                version,
-                fileName,
-                versionKey: versionKey(version),
-                formattedVersion: formatVersion(version)
-            } : null;
-        })
-        .filter(Boolean) as VersionFile[];
-
-    if (versionFiles.length < 2) throw new Error("需要至少两个版本文件才能比较！");
-
-    versionFiles.sort((a, b) => {
-        for (let i = 0; i < a.versionKey.length; i++)
-            if (a.versionKey[i] !== b.versionKey[i]) return a.versionKey[i] - b.versionKey[i];
-        return 0;
-    });
-
-    let newestFile: VersionFile;
-    let olderFile: VersionFile;
-
-    if (!targetVersion) {
-        newestFile = versionFiles.at(-1)!;
-        olderFile = versionFiles.at(-2)!;
-    } else {
-        const idx = versionFiles.findIndex(v => v.formattedVersion === targetVersion);
-        if (idx === -1) throw new Error(`未找到版本 ${targetVersion}`);
-        if (idx === 0) throw new Error(`版本 ${targetVersion} 没有更旧版本可比较`);
-        newestFile = versionFiles[idx];
-        olderFile = versionFiles[idx - 1];
+/**
+ * 对比两个已下载版本的 AssetBundleInfo（old → new 方向）。
+ * @param verNew 新版本（4 段 dataVersion，如 10.1.0.230）
+ * @param verOld 旧版本（4 段 dataVersion）
+ * 两版本文件必须已下载（缺失抛错）。返回 { outFile, summary: {added, changed}, versions: { verOld, verNew } }。
+ */
+export async function compareVersions(verNew: string, verOld: string) {
+    const newFile = path.join(ASSET_DIR, `AssetBundleInfo_${verNew}.txt`);
+    const oldFile = path.join(ASSET_DIR, `AssetBundleInfo_${verOld}.txt`);
+    for (const [ver, file] of [[verNew, newFile], [verOld, oldFile]] as const) {
+        try {
+            await fs.access(file);
+        } catch {
+            throw new Error(`未找到版本 ${ver} 的 AssetBundleInfo 文件，请先下载`);
+        }
     }
 
-    const verOld = olderFile.formattedVersion;
-    const verNew = newestFile.formattedVersion;
-
-    const oldMap = await readFileToAssetMap(path.join(ASSET_DIR, olderFile.fileName));
-    const newMap = await readFileToAssetMap(path.join(ASSET_DIR, newestFile.fileName));
+    const oldMap = await readFileToAssetMap(oldFile);
+    const newMap = await readFileToAssetMap(newFile);
 
     const added = [...newMap.keys()].filter(p => !oldMap.has(p)).sort();
     const changed = [...newMap.keys()].filter(p => oldMap.has(p) && newMap.get(p) !== oldMap.get(p)).sort();
@@ -125,13 +100,21 @@ export async function compareVersions(targetVersion?: string) {
 
 async function main() {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const target = (await rl.question("输入版本号 (留空默认最新): ")).trim();
+    const versions = await listDownloadedVersions();
+    const inputNew = (await rl.question("请输入新版本（留空用本地已下载的最新）：\n> ")).trim();
+    const inputOld = (await rl.question("请输入旧版本（留空用本地已下载的最新之前一个）：\n> ")).trim();
     rl.close();
 
     try {
-        const { outFile, summary, versions } = await compareVersions(target || undefined);
+        // 默认：新版本取最新（at(-1)），旧版本取相邻前一个（at(-2)）；有输入则用输入值
+        const verNew = inputNew || (versions.at(-1) ?? "");
+        const verOld = inputOld || (versions.at(-2) ?? "");
+        if (!verNew) throw new Error("AssetBundleInfo/ 目录下没有已下载的版本，请输入新版本");
+        if (!verOld) throw new Error("AssetBundleInfo/ 目录下至少需要两个已下载版本，请输入旧版本");
 
-        console.log(`\n✔ 对比完成: ${versions.verOld} → ${versions.verNew}`);
+        const { outFile, summary, versions: v } = await compareVersions(verNew, verOld);
+
+        console.log(`\n✔ 对比完成: ${v.verOld} → ${v.verNew}`);
         console.log(`新增: ${summary.added}, 修改: ${summary.changed}`);
         console.log(`结果已保存到: ${outFile}`);
     } catch (err) {

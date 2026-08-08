@@ -14,7 +14,7 @@ import { glob } from "glob";
 import { fileURLToPath } from "url";
 import readline from "node:readline/promises";
 import { downloadAB } from "@/downloadAssetBundleInfo.js";
-import { compareVersions } from "@/compare.js";
+import { compareVersions, listDownloadedVersions } from "@/compare.js";
 import { fetchSuiteMaster } from "@/garupa/api/suiteMaster.js";
 import { mainVersion, buildAssetBundleUrl, loadStore } from "@/garupa/assetBundleInfo.js";
 import { decodeSingleAcb } from "@/decodeAcb.js";
@@ -120,7 +120,11 @@ async function main() {
     console.log("[2/9] 对比版本差异 ...");
     let diff: { new: string[]; change: string[] };
     try {
-        const { outFile, versions } = await compareVersions(version);
+        // 旧版本 = AssetBundleInfo/ 目录里比新版本旧且最接近的已下载版本
+        const downloaded = await listDownloadedVersions();
+        const idx = downloaded.indexOf(version);
+        if (idx <= 0) throw new Error(`版本 ${version} 没有更旧版本可比较`);
+        const { outFile, versions } = await compareVersions(version, downloaded[idx - 1]);
         console.log(`对比完成: ${versions.verOld} → ${versions.verNew}`);
         console.log(`差异文件: ${outFile}`);
         diff = JSON.parse(await fs.readFile(outFile, "utf-8"));
@@ -129,7 +133,7 @@ async function main() {
         const inputQ2 = await rl.question("前一个版本文件缺失，请输入被比较的前一版本 dataVersion：\n> ");
         rl.close();
         await downloadAB(inputQ2.trim() || undefined);
-        const { outFile, versions } = await compareVersions(version);
+        const { outFile, versions } = await compareVersions(version, inputQ2.trim());
         console.log(`对比完成: ${versions.verOld} → ${versions.verNew}`);
         diff = JSON.parse(await fs.readFile(outFile, "utf-8"));
     }
