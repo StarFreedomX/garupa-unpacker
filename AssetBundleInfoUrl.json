@@ -1,10 +1,10 @@
-﻿{
+{
   "latest": {
     "clientVersion": "10.1.4",
-    "dataVersion": "10.1.0.230",
-    "masterDataVersion": "10.1.0.231"
+    "dataVersion": "10.1.0.250",
+    "masterDataVersion": "10.1.0.250"
   },
-  "nowDataVersion": "10.1.0.230",
+  "nowDataVersion": "10.1.0.250",
   "hashes": {
     "10.1.0": "e019f5bbbae4e182041ed1731df6e08b7708aa3536aefaeaeec04b1951c4d048",
     "10.0.0": "89b18473cdfe9b03de9a815d7467bc94d062d83e05a52e5c89d2901e87cbed2d",
@@ -16,8 +16,8 @@
   },
   "snapshots": {
     "10.1.4": {
-      "dataVersion": "10.1.0.230",
-      "masterDataVersion": "10.1.0.231"
+      "dataVersion": "10.1.0.250",
+      "masterDataVersion": "10.1.0.250"
     }
   }
 }

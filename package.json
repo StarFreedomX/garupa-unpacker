@@ -12,6 +12,7 @@
     "da": "npx tsx ./src/decodeAcb.ts",
     "mb": "npx tsx ./src/mergeBytes.ts",
     "ff": "npx tsx ./src/flatFolder.ts",
+    "view": "npx tsx ./src/view/index.ts",
     "grp": "npx tsx ./src/index.ts",
     "quick": "npx tsx ./src/quickUnpack.ts",
     "quick-master": "npx tsx ./src/quickMaster.ts",
@@ -36,6 +37,8 @@
     "p-limit": "^7.2.0",
     "protobufjs": "^8.7.1",
     "seek-bzip": "^2.0.0",
+    "skia-canvas": "^3.0.8",
+    "svg2img": "^1.0.0-beta.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
