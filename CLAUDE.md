@@ -11,11 +11,12 @@ proto/
     ├── CE.js                     # 由 CE.proto 编译生成（protobufjs pbjs 静态模块，~30 MB，勿手改）
     └── CE.d.ts                   # 由 CE.js 生成（pbts，~9.6 MB）
 src/
-├── index.ts                      # 一键流程：下载→对比→下载差异资源→解包→去重→合并→解码→扁平化
+├── index.ts                      # 一键流程：下载清单→对比→bundle 内存流水线→扁平化
 ├── downloadAssetBundleInfo.ts    # CLI：下载 AssetBundleInfo（留空 = 自动检测最新版）
-├── getAssets.ts                  # CLI：按 diff 下载差异资源到 analysing/<版本>/{new,change,change_old}
+├── getAssets.ts                  # CLI：按 diff 边下载边解包、内存对比和音频解码 → assets/<版本>/{new,change}
 ├── compare.ts                    # CLI：对比 AssetBundleInfo 两个版本 → compare/diff_<旧>_to_<新>.json
-├── export.ts                     # CLI：解包（node-asset-studio-mod）+ getDefaultPaths(version?)
+├── export.ts                     # CLI：旧本地 bundle 内存解包（node-asset-studio-mod-js）+ getDefaultPaths(version?)
+├── memoryAssets.ts              # Buffer 下载/解包、ACB/AWB 分片合并、HCA→WAV、内存比较、最终输出事务
 ├── removeUnchangedFiles.ts       # CLI：比对 change_old/change 删除内容未变的文件
 ├── mergeBytes.ts                 # CLI：合并分段 .acb（-001/-002 分片）
 ├── decodeAcb.ts                  # CLI：解 .acb 并解码 HCA → wav，change 与 change_old 同步解码去重
@@ -48,12 +49,16 @@ npx tsx src/suiteMaster.ts --output out/suite_master.json   # SuiteMaster → JS
 ### 一键流程（index.ts）
 1. `downloadAB(输入)` 确定本次运行的版本（输入版本号 / 完整 URL / 留空自动检测）→ 下载 AssetBundleInfo
 2. `compareVersions(result.version)` 对比「输入版本 vs 其前一个版本」→ `compare/diff_<旧>_to_<新>.json`
-3. `downloadDiffAssets(PROJECT_ROOT, outFile)` 按本次 diff 下载 → `analysing/<新版本>/{new,change,change_old}`
-4. `exportLatestAssets(undefined, versions.verNew)` 解包 → `assets/<新版本>/`
-5. `removeUnchangedFiles` 去重（change_old vs change）→ 合并分段 acb → `decodeAssets(versions.verNew)` 解码 → `flatFolder` 压平
-6. 可选 `REMOVE_ANALYSING_FILES=true` 清理 analysing/
+3. `downloadDiffAssets(PROJECT_ROOT, outFile, diff)` 直接接收内存 diff，按 bundle 限制并发：Buffer 下载 → `readAssets` → ACB/AWB 合并 → ACB 音轨 Buffer → HCA `decodeToMemory` → 最终文件内存对比 → 仅写变化文件。
+4. 最终文件先写临时输出目录，全部成功后替换 `assets/<新版本>/{new,change}`；失败不替换输出、不更新 nowDataVersion。没有 analysing/change_old/ACB/HCA 中间产物，重跑重新下载。
+5. 分类目录压平（保留版本根目录），重新读取 store 后更新 nowDataVersion。
 
-**关键约定**：本次运行的版本号（`result.version`，即输入的 dataVersion 或自动检测值）会贯穿第 2~6 步全链路——`compareVersions`、`downloadDiffAssets`、`getDefaultPaths(version)`、`decodeLatestAssets(version)` 全部固定该版本，各环节不得再从磁盘「找最新」。（历史教训：早期版本各环节各自找最新文件夹，导致下载旧版却在解包新版。）
+`quickUnpack.ts` 和 `downloadChart.ts` 复用同一内存模块。`quick` 解完一个 bundle 立即筛选并写最终文件，不保留整批结果或 quick-tmp。
+`readAssets` 是完整 bundle 级内存 API，不是网络字节增量解析。每个请求使用独立 Worker，结束/失败后关闭；不能并发复用同一个 AssetExporter。
+`hca-decoder@1.6` 忽略 Buffer 的 byteOffset/byteLength，必须传入精确复制的 ArrayBuffer。比较在合并分片与音频解码之后进行，避免丢失未变化但仍需参与解码的分片。
+运行要求 Node.js 22+，无需 .NET；HCA 仍需本机扩展。验证：`yarn typecheck`、`yarn test`。
+
+**关键约定**：本次运行的版本号（`result.version`，即输入的 dataVersion 或自动检测值）会贯穿第 2~5 步全链路——`compareVersions`、`downloadDiffAssets`、`getDefaultPaths(version)`、`decodeLatestAssets(version)` 全部固定该版本，各环节不得再从磁盘「找最新」。（历史教训：早期版本各环节各自找最新文件夹，导致下载旧版却在解包新版。）
 
 ### AssetBundleInfoUrl.json（版本记录）
 ```
@@ -91,5 +96,5 @@ yarn gen:proto
 ### 数据源
 - Game API: `api.garupa.jp/api/suite/master`（AES-128-CBC 加密 + BZip2 压缩）、`api.garupa.jp/api/application`（加密、无压缩）
 - CDN: `content.garupa.jp/Release/<dataVersion>_<hash>/Android/`（AssetBundleInfo 与资源文件）
-- 配置从 `.env` 读取：`GARUPA_AES_KEY`/`GARUPA_AES_IV`（AES 密钥，必填）、`GARUPA_CLIENT_VERSION_FORCE`（强制指定版本）/`GARUPA_CLIENT_VERSION_DEFAULT`（拉取 App Store 失败时兜底）、`UNITY_VERSION`（解包用）、`REMOVE_OLD_FILES`/`REMOVE_ANALYSING_FILES`
+- 配置从 `.env` 读取：`GARUPA_AES_KEY`/`GARUPA_AES_IV`（AES 密钥，必填）、`GARUPA_CLIENT_VERSION_FORCE`（强制指定版本）/`GARUPA_CLIENT_VERSION_DEFAULT`（拉取 App Store 失败时兜底）、`UNITY_VERSION`（解包用）、`ASSET_PIPELINE_CONCURRENCY`（默认 4）、`QUICK_UNPACK_CONCURRENCY`（可选覆盖）
 - Schema 来源：从游戏侧导出的 `proto/CE.proto`

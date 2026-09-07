@@ -1,13 +1,12 @@
 import { Acb } from 'acb';
-import HCA from 'hca-decoder';
+import { assetPath, decodeAcbBuffer, DEFAULT_HCA_KEY } from './memoryAssets.js';
 import fs from 'node:fs/promises';
 import path from 'path';
 import { getDefaultPaths, getCategoryPaths } from '@/export.js';
 import { fileURLToPath } from 'url';
 
-const HCADecoder = HCA.HCADecoder;
 const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
-const DEFAULT_KEY = 0x22CE;
+const DEFAULT_KEY = DEFAULT_HCA_KEY;
 
 // 分段acb文件格式
 const SEGMENTED_ACB_PATTERN = /-(\d{3,})\.acb$/i;
@@ -35,48 +34,27 @@ export async function decodeSingleAcb(
     deleteAcb = true,
     key = DEFAULT_KEY
 ): Promise<string> {
-    //处理后的acb路径
     const resolved = path.resolve(acbPath);
-    const dir = path.dirname(resolved);
-    const name = path.basename(resolved, '.acb');
-    const outDir = path.join(dir, name);
-
-    await fs.mkdir(outDir, { recursive: true });
-
-    // 提取
-    try {
-        await new Acb(resolved).extract(outDir);
-    } catch (err) {
-        console.error(`提取失败 ${path.basename(acbPath)}:`, (err as Error).message);
-        throw err;
+    const outDir = path.join(path.dirname(resolved), path.basename(resolved).replace(/\.acb$/i, ''));
+    const buffer = await fs.readFile(resolved);
+    const awbPath = resolved.replace(/\.acb$/i, '.awb');
+    const awb = await fs.readFile(awbPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return undefined;
+        throw error;
+    });
+    const files = await decodeAcbBuffer(buffer, awb, key);
+    if (!deleteHca) {
+        for (const entry of new Acb(buffer, awb).getFileList()) {
+            files.set(assetPath(entry.name), entry.buffer);
+        }
     }
-    if (deleteAcb) await fs.unlink(acbPath).catch((reason) => console.error(reason));
-
-    // 解码 HCA
-    const hcaFiles = (await fs.readdir(outDir))
-        .filter(f => f.toLowerCase().endsWith('.hca'))
-        .map(f => path.join(outDir, f));
-
-    if (hcaFiles.length > 0) {
-        const decoder = new HCADecoder(key, 0x0000);
-        // Promise 异步执行
-        await Promise.all(
-            hcaFiles.map(hcaPath =>
-                new Promise<void>((resolve, reject) => {
-                    decoder.decodeToWaveFile(hcaPath, async (err: any) => {
-                        if (err) {
-                            console.error(`解码失败 ${path.basename(hcaPath)}: ${err.message || err}`);
-                            reject(err);
-                        } else {
-                            if (deleteHca) await fs.unlink(hcaPath).catch((reason) => console.error(reason));
-                            resolve();
-                        }
-                    });
-                })
-            )
-        );
+    for (const [name, data] of files) {
+        const destination = path.join(outDir, assetPath(name));
+        await fs.mkdir(path.dirname(destination), { recursive: true });
+        await fs.writeFile(destination, data);
     }
-
+    // Retain the input on any decoding or writing error.
+    if (deleteAcb) await fs.unlink(resolved);
     console.log(`解码完成 → ${path.relative(process.cwd(), outDir)}`);
     return outDir;
 }

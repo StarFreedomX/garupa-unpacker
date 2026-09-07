@@ -1,7 +1,10 @@
 import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
-import { AssetExporter, ExportAssetsDefaultConfig } from "node-asset-studio-mod";
+import type { ExportAssetsDefaultConfig } from "node-asset-studio-mod-js";
+import { glob } from "glob";
+import pLimit from "p-limit";
+import { changedFiles, pipelineConcurrency, unpackBundle, withStagedOutput, createMemoryWriter } from "./memoryAssets.js";
 import {fileURLToPath} from "url";
 
 const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
@@ -23,8 +26,6 @@ if (fs.existsSync(envPath)) {
     console.warn("Warning: No .env or .env.example found.");
 }
 
-const UNITY_VERSION = process.env.UNITY_VERSION!;
-
 const PROJECT_ROOT = path.resolve(__dirname, ".."); // 项目根
 const ASSETS_DIR = path.join(PROJECT_ROOT, "assets");
 const ANALYSING_DIR = path.join(PROJECT_ROOT, "analysing");
@@ -37,7 +38,7 @@ export function getLatestVersionFolder(baseDir: string): string | null {
 
     const dirs = fs
         .readdirSync(baseDir, { withFileTypes: true })
-        .filter((d) => d.isDirectory())
+        .filter((d) => d.isDirectory() && /^\d+\.\d+\.\d+\.\d+$/.test(d.name))
         .map((d) => d.name)
         .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
 
@@ -48,8 +49,8 @@ export function getLatestVersionFolder(baseDir: string): string | null {
  * 获取默认输入输出路径
  */
 export function getDefaultPaths(version?: string): { input: string; output: string } {
-    const latestVersion = version ?? getLatestVersionFolder(ANALYSING_DIR);
-    if (!latestVersion) throw new Error(`analysing/ 下没有可用版本文件夹`);
+    const latestVersion = version ?? getLatestVersionFolder(ASSETS_DIR) ?? getLatestVersionFolder(ANALYSING_DIR);
+    if (!latestVersion) throw new Error(`assets/ 或 analysing/ 下没有可用版本文件夹`);
 
     const input = path.join(ANALYSING_DIR, latestVersion);
     const output = path.join(ASSETS_DIR, latestVersion);
@@ -76,29 +77,31 @@ export function getCategoryPaths(input: string): string[] {
  * 使用 AssetExporter 对象导出资源
  */
 export async function exportLatestAssets(config?: Partial<ExportAssetsDefaultConfig>, version?: string) {
-    const { input, output } = getDefaultPaths(version);
+    const { input, output } = getDefaultPaths(version ?? getLatestVersionFolder(ANALYSING_DIR) ?? undefined);
 
-    // 新建对象
-    const exporter = new AssetExporter({
-        unityVersion: UNITY_VERSION,
-        assetType: ["all"], // 默认类型
-        overwrite: true,
-        group: "container",
-        audioFormat: "wav",
-        ...config,
+    if (!fs.existsSync(input)) throw new Error(`没有本地 bundle: ${input}；在线下载解包请运行 yarn geta`);
+    await withStagedOutput(output, async stage => {
+        const writeFiles = createMemoryWriter(stage);
+        const limit = pLimit(pipelineConcurrency());
+        const tasks = ['new', 'change'].flatMap(category => {
+            const root = path.join(input, category);
+            const files = glob.sync('**/*', { cwd: root, nodir: true })
+                .filter(name => !/\.(resS|resource)$/i.test(name));
+            return files.map(name => limit(async () => {
+                const oldPath = path.join(input, 'change_old', name);
+                const previous = category === 'change' && fs.existsSync(oldPath)
+                    ? await unpackBundle(oldPath, config) : new Map<string, Buffer>();
+                const current = await unpackBundle(path.join(root, name), config);
+                await writeFiles(changedFiles(current, previous), category);
+            }));
+        });
+        // Wait for every writer before cleaning up a failed staging directory.
+        const results = await Promise.allSettled(tasks);
+        const errors = results.filter(r => r.status === 'rejected').map(r => r.reason);
+        if (errors.length) throw new AggregateError(errors, '本地 bundle 解包失败');
     });
-    const categoryPaths = getCategoryPaths(input);
-
-    for (const categoryPath of categoryPaths) {
-        await exporter.exportAssets(path.join(input,categoryPath), path.join(output, categoryPath));
-    }
-
-
-
-
-
-    //await exporter.exportAssets(input, output);
 }
+
 
 if (isMainProcess) {
     (async () => {

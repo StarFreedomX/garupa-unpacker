@@ -2,16 +2,12 @@ import { fileURLToPath } from "url";
 import { downloadAB, refreshAppData } from "@/downloadAssetBundleInfo.js";
 import { compareVersions, listDownloadedVersions } from "@/compare.js";
 import { downloadDiffAssets } from "@/getAssets.js";
-import { exportLatestAssets, getCategoryPaths, getDefaultPaths } from "@/export.js";
-import { removeUnchangedFiles } from "@/removeUnchangedFiles.js";
-import { mergeAllSegmentedAcbFiles } from "@/mergeBytes.js";
-import { decodeLatestAssets } from "@/decodeAcb.js";
 import { flatFolder } from "@/flatFolder.js";
 import { loadStore, saveStore, extractVersionFromUrl } from "@/garupa/assetBundleInfo.js";
 import path from "path";
 import dotenv from "dotenv";
 import fs from "node:fs";
-import axios, { AxiosError } from "axios";
+import axios from "axios";
 
 dotenv.config();
 
@@ -35,9 +31,6 @@ if (fs.existsSync(envPath)) {
 } else {
     console.warn("Warning: No .env or .env.example found.");
 }
-
-const REMOVE_OLD_FILES = process.env.REMOVE_OLD_FILES!;
-const REMOVE_ANALYSING_FILES = process.env.REMOVE_ANALYSING_FILES!;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -161,7 +154,7 @@ async function main() {
 
         // 7. 对比生成 diff
         console.log('对比文件中...');
-        const { outFile, summary, versions } = await compareVersions(newVersion, oldVersion);
+        const { outFile, diff, summary, versions } = await compareVersions(newVersion, oldVersion);
         console.log(`\n✔ 对比完成: ${versions.verOld} → ${versions.verNew}`);
         console.log(`新增: ${summary.added}, 修改: ${summary.changed}`);
         console.log(`结果已保存到: ${outFile}`);
@@ -170,73 +163,32 @@ async function main() {
         try {
             console.log('─'.repeat(60));
 
-            console.log('下载更改的文件...');
-            const dlResult = await downloadDiffAssets(PROJECT_ROOT, outFile);
-            if (dlResult.failed > 0) {
-                console.warn(`⚠ 下载失败 ${dlResult.failed}/${dlResult.total} 个文件（可能新版本资源未就绪）`);
-                const ans = await rl.question("是否用已下载部分继续？（重跑时会自动续传缺失文件）[y/N]: ");
-                if (!/^y/i.test(ans.trim())) {
-                    console.log("已中止。已下载部分保留在 analysing/，重跑即续传。");
-                    rl.close();
-                    return;
-                }
+            console.log('边下载边解包，在内存中去重并解码音频...');
+            const result = await downloadDiffAssets(PROJECT_ROOT, outFile, diff);
+            if (result.failed > 0) {
+                throw new Error(`处理失败 ${result.failed}/${result.total} 个 bundle；原输出保持不变，重跑会重新下载处理`);
             }
 
-            console.log('─'.repeat(60));
-
-            console.log('开始进行解包...');
-            await exportLatestAssets(undefined, versions.verNew);
-
-            console.log('─'.repeat(60));
-
-            console.log('文件去重中...')
-            const {input, output} = getDefaultPaths(versions.verNew);
-            const categoryFolders = getCategoryPaths(input);
-            // 处理 change 与 change_old
-            if (categoryFolders.includes("change") && categoryFolders.includes("change_old")) {
-                await removeUnchangedFiles(
-                    path.join(output, "change_old"),
-                    path.join(output, "change"),
-                    REMOVE_OLD_FILES === 'true'
-                );
-            } else {
-                console.log("未找到 change/change_old 文件夹，跳过比较。");
-            }
-
-            console.log('─'.repeat(60));
-
-            console.log('合并分段acb文件...');
-            await mergeAllSegmentedAcbFiles(output);
-
-            console.log('─'.repeat(60));
-
-            console.log('解析acb文件...');
-            await decodeLatestAssets(versions.verNew);
-
-            console.log('─'.repeat(60));
-
-            console.log('扁平化路径...')
-            await flatFolder(output)
-
-            console.log('─'.repeat(60));
-
-            if (REMOVE_ANALYSING_FILES === 'true') {
-                console.log('清理中间文件中...')
-                await fs.promises.rm(getDefaultPaths(versions.verNew).input, { recursive: true, force: true });
-                console.log('─'.repeat(60));
+            console.log('扁平化路径...');
+            // Keep assets/<version> stable even when only one category is present.
+            for (const entry of await fs.promises.readdir(result.output, { withFileTypes: true })) {
+                if (entry.isDirectory()) await flatFolder(path.join(result.output, entry.name));
             }
 
             // 提交点：解包全部成功后更新本机当前已解包版本
-            store.nowDataVersion = versions.verNew;
-            await saveStore(store, JSON_PATH);
+            const completedStore = await loadStore(JSON_PATH);
+            completedStore.nowDataVersion = versions.verNew;
+            await saveStore(completedStore, JSON_PATH);
             console.log(`已更新 nowDataVersion: ${versions.verNew}`);
 
             console.log('解包完成')
         } catch (err) {
             console.error("解包流程失败，nowDataVersion 未更新:", err instanceof Error ? err.message : err);
+            process.exitCode = 1;
         }
     } catch (err) {
         console.error("流程失败:", err instanceof Error ? err.message : err);
+        process.exitCode = 1;
     } finally {
         rl.close();
     }

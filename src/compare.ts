@@ -7,6 +7,8 @@ const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
 const ASSET_DIR = "AssetBundleInfo";
 const OUT_DIR = "compare";
 
+export interface AssetDiff { new: string[]; change: string[] }
+
 type AssetMap = Map<string, string>;
 
 
@@ -94,7 +96,7 @@ export async function compareVersions(verNew: string, verOld: string) {
     const result = { new: added, change: changed };
     await fs.writeFile(outFile, JSON.stringify(result, null, 2), "utf-8");
 
-    return { outFile, summary: { added: added.length, changed: changed.length }, versions: { verOld, verNew } };
+    return { outFile, diff: result, summary: { added: added.length, changed: changed.length }, versions: { verOld, verNew } };
 }
 
 

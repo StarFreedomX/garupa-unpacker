@@ -6,9 +6,8 @@
 import dotenv from "dotenv";
 import * as fs from "fs";
 import * as path from "path";
-import axios from "axios";
 import { fileURLToPath } from "url";
-import { AssetExporter } from "node-asset-studio-mod";
+import { downloadBundle, unpackBundle, withStagedOutput, writeMemoryFiles } from "./memoryAssets.js";
 import { mainVersion, buildAssetBundleUrl, loadStore } from "./garupa/assetBundleInfo.js";
 
 dotenv.config();
@@ -18,7 +17,6 @@ const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 
 const URL_JSON_PATH = path.join(PROJECT_ROOT, "AssetBundleInfoUrl.json");
-const UNITY_VERSION = process.env.UNITY_VERSION!;
 
 function extractPrefix(url: string): string {
     const parts = url.split("/AssetBundleInfo");
@@ -33,40 +31,6 @@ function extractPrefix(url: string): string {
 function getMusicScoreBundleName(bgmNumber: number): string {
     const bundleId = Math.ceil(bgmNumber / 10) * 10;
     return `musicscore/musicscore${bundleId}`;
-}
-
-async function downloadFile(
-    baseUrl: string,
-    saveRoot: string,
-    assetPath: string
-): Promise<string> {
-    const cleanPath = assetPath.startsWith("/") ? assetPath.substring(1) : assetPath;
-    const url = `${baseUrl}${cleanPath}`;
-    const savePath = path.join(saveRoot, cleanPath);
-
-    if (fs.existsSync(savePath)) {
-        console.log(`[跳过] 已存在: ${cleanPath}`);
-        return savePath;
-    }
-
-    console.log(`[下载] ${url}`);
-    fs.mkdirSync(path.dirname(savePath), { recursive: true });
-
-    const response = await axios.get(url, {
-        responseType: "stream",
-        timeout: 30000,
-        headers: { "User-Agent": "garupa-getAssets/1.0.0" },
-    });
-
-    const writer = fs.createWriteStream(savePath);
-    await new Promise<void>((resolve, reject) => {
-        response.data.pipe(writer);
-        writer.on("finish", resolve);
-        writer.on("error", reject);
-    });
-
-    console.log(`[完成] ${cleanPath}`);
-    return savePath;
 }
 
 async function main() {
@@ -90,53 +54,14 @@ async function main() {
 
     // 2. 确定 musicscore 包名
     const bundlePath = getMusicScoreBundleName(bgmNumber);
-    const assetFileName = path.basename(bundlePath);
     console.log(`谱面包: ${bundlePath}`);
 
-    // 3. 下载到 analysing
-    const downloadDir = path.join(PROJECT_ROOT, "analysing", latestVersion);
-    const savedPath = await downloadFile(baseUrl, downloadDir, bundlePath);
-    console.log(`已保存到: ${savedPath}`);
-
-    // 4. 导出解包
-    const bundleId = Math.ceil(bgmNumber / 10) * 10;
+    // Download and decode in memory; only final chart files are written.
     const outputDir = path.join(PROJECT_ROOT, "assets", latestVersion, `chart_bgm${bgmNumber}`);
-    if (fs.existsSync(outputDir)) {
-        fs.rmSync(outputDir, { recursive: true, force: true });
-    }
-    fs.mkdirSync(outputDir, { recursive: true });
-
-    console.log(`\n解包中... (Unity ${UNITY_VERSION})`);
-    const exporter = new AssetExporter({
-        unityVersion: UNITY_VERSION,
-        assetType: ["all"],
-        overwrite: true,
-        group: "container",
-        audioFormat: "wav",
+    await withStagedOutput(outputDir, async stage => {
+        const files = await unpackBundle(await downloadBundle(baseUrl, bundlePath));
+        await writeMemoryFiles(stage, files);
     });
-
-    // 输入是 analysing/{version}/{musicscore/musicscore100} 这个文件
-    // 但 AssetExporter 需要的是目录路径...
-    // 实际上 node-asset-studio-mod 的 exportAssets 接收 input 目录或文件
-    // 我们需要把文件放到正确结构的目录里
-    // 直接导出 asset bundle 文件
-    const inputFileDir = path.dirname(savedPath);
-    const inputFileName = path.basename(savedPath);
-
-    // 我们将文件放入一个临时目录，让 AssetExporter 处理
-    const tempInputDir = path.join(PROJECT_ROOT, "analysing", latestVersion, `_chart_extract_bgm${bgmNumber}`);
-    if (fs.existsSync(tempInputDir)) {
-        fs.rmSync(tempInputDir, { recursive: true, force: true });
-    }
-    fs.mkdirSync(tempInputDir, { recursive: true });
-    // 复制原始文件过去 (或创建硬链接)
-    fs.copyFileSync(savedPath, path.join(tempInputDir, inputFileName));
-
-    await exporter.exportAssets(tempInputDir, outputDir);
-
-    // 清理临时目录
-    fs.rmSync(tempInputDir, { recursive: true, force: true });
-
     console.log(`解包完成，输出目录: ${outputDir}\n`);
 
     // 5. 查找 easy 谱面

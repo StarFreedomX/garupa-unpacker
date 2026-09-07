@@ -1,24 +1,35 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import axios, { AxiosInstance } from 'axios';
 import { glob } from 'glob';
 import pLimit from 'p-limit';
 import { mainVersion, buildAssetBundleUrl, loadStore } from "@/garupa/assetBundleInfo.js";
+import { changedFiles, downloadBundle, pipelineConcurrency, unpackBundle, withStagedOutput, createMemoryWriter, type UnpackTimings } from "./memoryAssets.js";
+import type { AssetDiff } from "./compare.js";
+
 const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
 
-const MAX_CONCURRENT_DOWNLOADS = 10;
-const PER_FILE_RETRIES = 3;
-const PER_FILE_BACKOFF_SECONDS = 1.0;
-const TIMEOUT_MS = 30000;
-
-const HEADERS = {
-    "User-Agent": "garupa-getAssets/1.0.0"
-};
 
 const URL_JSON_NAME = "AssetBundleInfoUrl.json";
 const DIFF_DIR_NAME = "compare";
-const ASSETS_DIR_NAME = "analysing";
+const ASSETS_DIR_NAME = "assets";
+
+export interface VersionTimings extends UnpackTimings {
+    version: string;
+    downloadMs: number;
+    downloadBytes: number;
+}
+export interface BundleTimings {
+    name: string;
+    category: 'new' | 'change';
+    queueMs: number;
+    totalMs: number;
+    compareMs: number;
+    writeMs: number;
+    writtenFiles: number;
+    versions: VersionTimings[];
+    error?: string;
+}
 
 /**
  * 获取资源路径URL前缀
@@ -54,77 +65,13 @@ async function getLatestDiffByVersion(diffDir: string): Promise<string> {
     //排序
     parsed.sort((a, b) => compareVersion(a.newVer, b.newVer));
 
+    if (!parsed.length) throw new Error("没有有效版本号的差异文件");
     return parsed[0].file;
 }
 
-/**
- * 下载函数
- * @param axiosInstance
- * @param baseUrl 下载资源的网络地址前缀
- * @param saveRoot 保存根路径，如
- * @param assetPath 资源路径
- */
-async function downloadFile(
-    axiosInstance: AxiosInstance,
-    baseUrl: string,
-    saveRoot: string,
-    assetPath: string
-): Promise<boolean> {
-
-    const cleanPath = assetPath.startsWith("/") ? assetPath.substring(1) : assetPath;
-    const url = `${baseUrl}${cleanPath}`;
-    const savePath = path.join(saveRoot, cleanPath);
-
-    // 🟢 检查是否已存在，不重复下载
-    try {
-        await fs.access(savePath);
-        console.log(`[跳过] 已存在: ${cleanPath}`);
-        return true; // 直接成功
-    } catch {
-        // 文件不存在 -> 要下载
-    }
-
-    let attempt = 0;
-    let backoff = PER_FILE_BACKOFF_SECONDS;
-
-    while (attempt < PER_FILE_RETRIES) {
-        attempt++;
-
-        try {
-            await fs.mkdir(path.dirname(savePath), { recursive: true });
-            const response = await axiosInstance.get(url, { responseType: 'stream' });
-            const writer = (await import('fs')).createWriteStream(savePath);
-
-            await new Promise<void>((resolve, reject) => {
-                response.data.pipe(writer);
-                writer.on('finish', resolve);
-                writer.on('error', reject);
-            });
-
-            console.log(`完成: ${cleanPath}`);
-            return true;
-
-        } catch (e: any) {
-            const status = e.response?.status;
-            if (status === 403 || status === 404) {
-                console.log(`[失败] ${cleanPath} -> HTTP ${status} (不重试)`);
-                return false;
-            }
-
-            console.log(`[异常] ${cleanPath} -> ${status || '未知'} (第 ${attempt}/${PER_FILE_RETRIES} 次)`);
-
-            if (attempt < PER_FILE_RETRIES) {
-                await new Promise(resolve => setTimeout(resolve, backoff * 1000));
-                backoff *= 2;
-            }
-        }
-    }
-
-    console.log(`[最终失败] ${cleanPath}`);
-    return false;
-}
-
-export async function downloadDiffAssets(PROJECT_ROOT: string, diffFile?: string): Promise<{ total: number; failed: number }> {
+export async function downloadDiffAssets(PROJECT_ROOT: string, diffFile?: string, diff?: AssetDiff): Promise<{ total: number; failed: number; output: string; timings: { totalMs: number; bundles: BundleTimings[] } }> {
+    const pipelineStarted = performance.now();
+    const bundles: BundleTimings[] = [];
 
     // AssetBundleInfo下载地址的json文件路径
     const FULL_URL_JSON_PATH = path.join(PROJECT_ROOT, URL_JSON_NAME);
@@ -149,45 +96,77 @@ export async function downloadDiffAssets(PROJECT_ROOT: string, diffFile?: string
     console.log(`旧版本: ${oldVersion}`);
     console.log(`新版本: ${newVersion}`);
 
-    const diffJson: {"new": string[], "change": string[]} = JSON.parse(await fs.readFile(resolvedDiffFile, "utf8"));
+    const diffJson: AssetDiff = diff ?? JSON.parse(await fs.readFile(resolvedDiffFile, "utf8"));
 
-    const axiosInstance = axios.create({
-        timeout: TIMEOUT_MS,
-        headers: HEADERS
-    });
     const hashNew = store.hashes[mainVersion(newVersion)];
     const hashOld = store.hashes[mainVersion(oldVersion)];
     if (!hashNew) throw new Error(`hashes 缺少主版本 ${mainVersion(newVersion)} 的 hash，请先运行 downloadAssetBundleInfo 粘贴一次该主版本 URL`);
-    if (!hashOld) throw new Error(`hashes 缺少主版本 ${mainVersion(oldVersion)} 的 hash，请先运行 downloadAssetBundleInfo 粘贴一次该主版本 URL`);
+    if (diffJson.change.length && !hashOld) throw new Error(`hashes 缺少主版本 ${mainVersion(oldVersion)} 的 hash，请先运行 downloadAssetBundleInfo 粘贴一次该主版本 URL`);
 
     const baseUrlNew = extractPrefix(buildAssetBundleUrl(newVersion, hashNew));
-    const baseUrlOld = extractPrefix(buildAssetBundleUrl(oldVersion, hashOld));
+    const baseUrlOld = hashOld ? extractPrefix(buildAssetBundleUrl(oldVersion, hashOld)) : "";
 
-    const newRoot = path.join(FULL_ASSETS_DIR, newVersion);
-    const dirNew = path.join(newRoot, "new");
-    const dirChange = path.join(newRoot, "change");
-    const dirChangeOld = path.join(newRoot, "change_old");
-
-    await fs.mkdir(dirNew, { recursive: true });
-    await fs.mkdir(dirChange, { recursive: true });
-    await fs.mkdir(dirChangeOld, { recursive: true });
-
-    const limit = pLimit(MAX_CONCURRENT_DOWNLOADS);
-
-    const tasks = [
-        ...diffJson.new.map((f: string) => limit(() => downloadFile(axiosInstance, baseUrlNew, dirNew, f))),
-        ...diffJson.change.map((f: string) => limit(() => downloadFile(axiosInstance, baseUrlNew, dirChange, f))),
-        ...diffJson.change.map((f: string) => limit(() => downloadFile(axiosInstance, baseUrlOld, dirChangeOld, f)))
-    ];
-
-    console.log(`开始下载 NEW(${diffJson.new.length}) + CHANGE(${diffJson.change.length * 2}) ...\n`);
-
-    const results = await Promise.all(tasks);
-    const failed = results.filter(r => !r).length;
-
-    console.log(`下载完成 -> assets/${newVersion}/（成功 ${results.length - failed}/${results.length}）`);
-
-    return { total: results.length, failed };
+    const output = path.join(FULL_ASSETS_DIR, newVersion);
+    const total = diffJson.new.length + diffJson.change.length;
+    const failures: Error[] = [];
+    console.log(`开始内存流水线 NEW(${diffJson.new.length}) + CHANGE(${diffJson.change.length} 对) ...`);
+    try {
+        await withStagedOutput(output, async stage => {
+            const writeFiles = createMemoryWriter(stage);
+            const limit = pLimit(pipelineConcurrency());
+            const run = (name: string, category: 'new' | 'change') => limit(async () => {
+                const started = performance.now();
+                const timing: BundleTimings = {
+                    name, category, queueMs: started - pipelineStarted, totalMs: 0,
+                    compareMs: 0, writeMs: 0, writtenFiles: 0, versions: [],
+                };
+                bundles.push(timing);
+                const load = async (baseUrl: string, version: string) => {
+                    const item: VersionTimings = { version, downloadMs: 0, downloadBytes: 0, exportMs: 0, finalizeMs: 0, fileCount: 0, outputBytes: 0 };
+                    timing.versions.push(item);
+                    const begin = performance.now();
+                    const bytes = await downloadBundle(baseUrl, name);
+                    item.downloadMs = performance.now() - begin;
+                    item.downloadBytes = bytes.length;
+                    console.log(`[下载] ${version}/${name}: ${(item.downloadMs / 1000).toFixed(2)}s，${(bytes.length / 1048576).toFixed(2)}MiB`);
+                    const files = await unpackBundle(bytes, {}, item);
+                    console.log(`[解包] ${version}/${name}: ${(item.exportMs / 1000).toFixed(2)}s，后处理 ${(item.finalizeMs / 1000).toFixed(2)}s，${files.size} 个文件`);
+                    return files;
+                };
+                try {
+                    // Each pair is kept together; no queue of downloaded buffers can accumulate.
+                    const previous = category === 'change'
+                        ? await load(baseUrlOld, oldVersion)
+                        : new Map<string, Buffer>();
+                    const current = await load(baseUrlNew, newVersion);
+                    const compareStarted = performance.now();
+                    const files = changedFiles(current, previous);
+                    timing.compareMs = performance.now() - compareStarted;
+                    const writeStarted = performance.now();
+                    await writeFiles(files, category);
+                    timing.writeMs = performance.now() - writeStarted;
+                    timing.writtenFiles = files.size;
+                    console.log(`[完成] ${category}/${name}: 写出 ${files.size}，未变化 ${current.size - files.size}`);
+                } catch (error) {
+                    const failure = new Error(`${category}/${name}: ${error instanceof Error ? error.message : error}`);
+                    failures.push(failure);
+                    timing.error = failure.message;
+                    console.error(`[失败] ${failure.message}`);
+                } finally {
+                    timing.totalMs = performance.now() - started;
+                }
+            });
+            await Promise.all([
+                ...diffJson.new.map(name => run(name, 'new')),
+                ...diffJson.change.map(name => run(name, 'change')),
+            ]);
+            if (failures.length) throw new AggregateError(failures, '资源流水线失败');
+        });
+    } catch (error) {
+        if (!(error instanceof AggregateError) || !failures.length) throw error;
+    }
+    console.log(`处理完成（成功 ${total - failures.length}/${total} 个 bundle）；${failures.length ? '原输出保持不变' : output}`);
+    return { total, failed: failures.length, output, timings: { totalMs: performance.now() - pipelineStarted, bundles } };
 }
 
 
@@ -197,7 +176,8 @@ async function main() {
     const __dirname = path.dirname(__filename);
     const PROJECT_ROOT = path.resolve(__dirname, '..');
 
-    await downloadDiffAssets(PROJECT_ROOT);
+    const result = await downloadDiffAssets(PROJECT_ROOT);
+    if (result.failed) process.exitCode = 1;
 }
 if (isMainProcess){
     main().catch(err => {
