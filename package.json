@@ -38,6 +38,7 @@
     "node-asset-studio-mod-js": "^0.1.1",
     "p-limit": "^7.2.0",
     "protobufjs": "^8.7.1",
+    "proxy-agent": "^8.0.2",
     "seek-bzip": "^2.0.0",
     "skia-canvas": "^3.0.8",
     "svg2img": "^1.0.0-beta.2",

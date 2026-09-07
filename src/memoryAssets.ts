@@ -3,12 +3,9 @@ import { AssetTypes, readAssets, type AssetInput, type AssetType, type ExportAss
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import axios, { type AxiosInstance } from 'axios';
-import dotenv from 'dotenv';
+import { downloadAsset } from './network.js';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 
-const projectRoot = fileURLToPath(new URL('../', import.meta.url));
-dotenv.config({ path: [path.join(projectRoot, '.env'), path.join(projectRoot, '.env.example')], quiet: true });
 
 export type MemoryFiles = Map<string, Buffer>;
 export interface UnpackTimings {
@@ -188,21 +185,7 @@ export function pipelineConcurrency(value = process.env.ASSET_PIPELINE_CONCURREN
 export async function downloadBundle(baseUrl: string, name: string, client: AxiosInstance = axios): Promise<Buffer> {
     const clean = assetPath(name.replace(/^\//, ''));
     const url = `${baseUrl.replace(/\/?$/, '/')}${clean}`;
-    for (let attempt = 1; ; attempt++) {
-        try {
-            const response = await client.get<ArrayBuffer>(url, {
-                responseType: 'arraybuffer', timeout: 30_000,
-                maxContentLength: 512 * 1024 * 1024,
-                headers: { 'User-Agent': 'garupa-getAssets/1.0.0' },
-            });
-            return Buffer.from(response.data);
-        } catch (error) {
-            const status = axios.isAxiosError(error) ? error.response?.status : undefined;
-            if (attempt >= 3 || status === 403 || status === 404) throw error;
-            console.warn(`[重试 ${attempt}/3] ${clean}: ${error instanceof Error ? error.message : error}`);
-            await new Promise(resolve => setTimeout(resolve, 1000 * 2 ** (attempt - 1)));
-        }
-    }
+    return downloadAsset(url, client);
 }
 
 /** Deduplicate shared output paths using in-memory hashes; serialize identical concurrent writes. */

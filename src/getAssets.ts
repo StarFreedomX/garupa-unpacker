@@ -5,6 +5,7 @@ import { glob } from 'glob';
 import pLimit from 'p-limit';
 import { mainVersion, buildAssetBundleUrl, loadStore } from "@/garupa/assetBundleInfo.js";
 import { changedFiles, downloadBundle, pipelineConcurrency, unpackBundle, withStagedOutput, createMemoryWriter, type UnpackTimings } from "./memoryAssets.js";
+import { integerSetting } from "./network.js";
 import type { AssetDiff } from "./compare.js";
 
 const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
@@ -18,6 +19,7 @@ export interface VersionTimings extends UnpackTimings {
     version: string;
     downloadMs: number;
     downloadBytes: number;
+    unpackQueueMs: number;
 }
 export interface BundleTimings {
     name: string;
@@ -110,10 +112,12 @@ export async function downloadDiffAssets(PROJECT_ROOT: string, diffFile?: string
     const total = diffJson.new.length + diffJson.change.length;
     const failures: Error[] = [];
     console.log(`开始内存流水线 NEW(${diffJson.new.length}) + CHANGE(${diffJson.change.length} 对) ...`);
+    console.log(`并发设置：流水线 ${pipelineConcurrency()}，网络请求 ${integerSetting('DOWNLOAD_CONCURRENCY', 8, 64)}，单包分段 ${integerSetting('DOWNLOAD_THREADS', 4, 16)}，解包 ${integerSetting('UNPACK_CONCURRENCY', 4)}`);
     try {
         await withStagedOutput(output, async stage => {
             const writeFiles = createMemoryWriter(stage);
             const limit = pLimit(pipelineConcurrency());
+            const unpack = pLimit(integerSetting('UNPACK_CONCURRENCY', 4));
             const run = (name: string, category: 'new' | 'change') => limit(async () => {
                 const started = performance.now();
                 const timing: BundleTimings = {
@@ -122,23 +126,31 @@ export async function downloadDiffAssets(PROJECT_ROOT: string, diffFile?: string
                 };
                 bundles.push(timing);
                 const load = async (baseUrl: string, version: string) => {
-                    const item: VersionTimings = { version, downloadMs: 0, downloadBytes: 0, exportMs: 0, finalizeMs: 0, fileCount: 0, outputBytes: 0 };
+                    const item: VersionTimings = { version, downloadMs: 0, downloadBytes: 0, unpackQueueMs: 0, exportMs: 0, finalizeMs: 0, fileCount: 0, outputBytes: 0 };
                     timing.versions.push(item);
                     const begin = performance.now();
                     const bytes = await downloadBundle(baseUrl, name);
                     item.downloadMs = performance.now() - begin;
                     item.downloadBytes = bytes.length;
                     console.log(`[下载] ${version}/${name}: ${(item.downloadMs / 1000).toFixed(2)}s，${(bytes.length / 1048576).toFixed(2)}MiB`);
-                    const files = await unpackBundle(bytes, {}, item);
+                    const queued = performance.now();
+                    const files = await unpack(() => {
+                        item.unpackQueueMs = performance.now() - queued;
+                        return unpackBundle(bytes, {}, item);
+                    });
                     console.log(`[解包] ${version}/${name}: ${(item.exportMs / 1000).toFixed(2)}s，后处理 ${(item.finalizeMs / 1000).toFixed(2)}s，${files.size} 个文件`);
                     return files;
                 };
                 try {
-                    // Each pair is kept together; no queue of downloaded buffers can accumulate.
-                    const previous = category === 'change'
-                        ? await load(baseUrlOld, oldVersion)
-                        : new Map<string, Buffer>();
-                    const current = await load(baseUrlNew, newVersion);
+                    // Keep a bounded number of pairs in flight, but download both versions concurrently.
+                    // Drain both sides even on failure before releasing the pair's pipeline slot.
+                    const results = await Promise.allSettled([
+                        category === 'change' ? load(baseUrlOld, oldVersion) : Promise.resolve(new Map<string, Buffer>()),
+                        load(baseUrlNew, newVersion),
+                    ]);
+                    const rejected = results.find(result => result.status === 'rejected');
+                    if (rejected?.status === 'rejected') throw rejected.reason;
+                    const [previous, current] = results.map(result => (result as PromiseFulfilledResult<Map<string, Buffer>>).value);
                     const compareStarted = performance.now();
                     const files = changedFiles(current, previous);
                     timing.compareMs = performance.now() - compareStarted;

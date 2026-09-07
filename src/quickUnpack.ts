@@ -8,6 +8,7 @@ import dotenv from "dotenv";
 import * as fs from "node:fs/promises";
 import * as path from "path";
 import pLimit from "p-limit";
+import { integerSetting } from "./network.js";
 import { downloadBundle, pipelineConcurrency, unpackBundle, withStagedOutput, createMemoryWriter, type MemoryFiles } from "./memoryAssets.js";
 import { fileURLToPath } from "url";
 import readline from "node:readline/promises";
@@ -220,11 +221,13 @@ async function main() {
         if (!hash) throw new Error(`hashes 缺少主版本 ${mainVersion(version)} 的 hash`);
         const baseUrl = buildAssetBundleUrl(version, hash).split("/AssetBundleInfo")[0] + "/";
         const limit = pLimit(pipelineConcurrency(process.env.QUICK_UNPACK_CONCURRENCY ?? process.env.ASSET_PIPELINE_CONCURRENCY));
+        const unpack = pLimit(integerSetting('UNPACK_CONCURRENCY', 4));
         const monthlyBundles = new Set(monthlyRankings.filter(m => m.assetBundleName)
             .map(m => `event/${m.assetBundleName}/topscreen`));
         const tasks = [...downloadSet].map(bundle => limit(async () => {
             try {
-                const files = await unpackBundle(await downloadBundle(baseUrl, bundle));
+                const bytes = await downloadBundle(baseUrl, bundle);
+                const files = await unpack(() => unpackBundle(bytes));
                 const picked: MemoryFiles = new Map();
                 for (const [name, data] of files) {
                     const base = path.posix.basename(name);

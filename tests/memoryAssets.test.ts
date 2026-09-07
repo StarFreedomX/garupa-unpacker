@@ -213,6 +213,8 @@ test('diff pipeline pins both versions, unpacks completed downloads, deduplicate
             await new Promise(resolve => setTimeout(resolve, 10));
         }
         assert.ok(completedWhileDownloading, 'the completed bundle should unpack before all downloads finish');
+        assert.ok(requests.some(url => url.includes(`/${newVersion}_`) && url.endsWith('/changed')),
+            'the changed bundle new version must start while its old download is blocked');
     } finally {
         releaseOld();
     }

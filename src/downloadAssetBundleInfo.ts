@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import axios, { AxiosError } from 'axios';
+import { AxiosError } from 'axios';
+import { networkGet } from './network.js';
 import { fileURLToPath } from "url";
 import {
     mainVersion, compareVersions, buildAssetBundleUrl, extractVersionFromUrl, extractHashFromUrl,
@@ -174,7 +175,7 @@ export async function downloadAB(inputAssetBundlePath?: string) {
     } catch {
         console.log(`正在下载 ${version} ...`);
         try {
-            const res = await axios.get(url, {
+            const res = await networkGet(url, {
                 responseType: "arraybuffer",
                 timeout: 20000,
             });

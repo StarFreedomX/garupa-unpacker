@@ -1,27 +1,9 @@
-/**
- * 通用 HTTP 下载工具（https.get 实现，60s 超时）。
- */
-import * as https from "https";
+import { networkGet } from '../network.js';
 
-/**
- * 下载 URL 返回原始 Buffer。
- * @param url 目标 URL
- * @param headers 请求头
- */
-export function download(url: string, headers: Record<string, string>): Promise<Buffer> {
-    return new Promise((resolve, reject) => {
-        const req = https.get(url, { headers }, (res) => {
-            const chunks: Buffer[] = [];
-            res.on("data", (chunk: Buffer) => chunks.push(chunk));
-            res.on("end", () => resolve(Buffer.concat(chunks)));
-            res.on("error", reject);
-        });
-        req.on("error", reject);
-        req.setTimeout(60_000, () => {
-            req.destroy();
-            reject(new Error("Timeout"));
-        });
-    });
+/** Download API bytes through the same proxy and request budget as asset downloads. */
+export async function download(url: string, headers: Record<string, string>): Promise<Buffer> {
+    const response = await networkGet(url, { headers, timeout: 60_000 });
+    return Buffer.from(response.data);
 }
 
 /** iTunes Lookup API 使用的浏览器 UA（避免被 App Store 接口拒绝） */

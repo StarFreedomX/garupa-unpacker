@@ -54,7 +54,7 @@ npx tsx src/suiteMaster.ts --output out/suite_master.json   # SuiteMaster → JS
 5. 分类目录压平（保留版本根目录），重新读取 store 后更新 nowDataVersion。
 
 `quickUnpack.ts` 和 `downloadChart.ts` 复用同一内存模块。`quick` 解完一个 bundle 立即筛选并写最终文件，不保留整批结果或 quick-tmp。
-`readAssets` 是完整 bundle 级内存 API，不是网络字节增量解析。每个请求使用独立 Worker，结束/失败后关闭；不能并发复用同一个 AssetExporter。
+`readAssets` 是完整 bundle 级内存 API，不是网络字节增量解析。网络统一使用 `src/network.ts` 的代理和全局请求预算；变化包新旧版本同时下载，单包支持校验版本的 Range 并发下载，下载完整后才解包。解包与在途版本对分别限制并发，失败时等待同组请求/任务退出再清理。每个解包请求使用独立 Worker，结束/失败后关闭；不能并发复用同一个 AssetExporter。
 `hca-decoder@1.6` 忽略 Buffer 的 byteOffset/byteLength，必须传入精确复制的 ArrayBuffer。比较在合并分片与音频解码之后进行，避免丢失未变化但仍需参与解码的分片。
 运行要求 Node.js 22+，无需 .NET；HCA 仍需本机扩展。验证：`yarn typecheck`、`yarn test`。
 
@@ -96,5 +96,5 @@ yarn gen:proto
 ### 数据源
 - Game API: `api.garupa.jp/api/suite/master`（AES-128-CBC 加密 + BZip2 压缩）、`api.garupa.jp/api/application`（加密、无压缩）
 - CDN: `content.garupa.jp/Release/<dataVersion>_<hash>/Android/`（AssetBundleInfo 与资源文件）
-- 配置从 `.env` 读取：`GARUPA_AES_KEY`/`GARUPA_AES_IV`（AES 密钥，必填）、`GARUPA_CLIENT_VERSION_FORCE`（强制指定版本）/`GARUPA_CLIENT_VERSION_DEFAULT`（拉取 App Store 失败时兜底）、`UNITY_VERSION`（解包用）、`ASSET_PIPELINE_CONCURRENCY`（默认 4）、`QUICK_UNPACK_CONCURRENCY`（可选覆盖）
+- 配置从 `.env` 读取：`GARUPA_AES_KEY`/`GARUPA_AES_IV`（AES 密钥，必填）、`GARUPA_CLIENT_VERSION_FORCE`（强制指定版本）/`GARUPA_CLIENT_VERSION_DEFAULT`（拉取 App Store 失败时兜底）、`UNITY_VERSION`（解包用）、`ASSET_PIPELINE_CONCURRENCY`（默认 4）、`QUICK_UNPACK_CONCURRENCY`（可选覆盖）、`UNPACK_CONCURRENCY`（解包默认 4）、`DOWNLOAD_CONCURRENCY`（全局请求默认 8）、`DOWNLOAD_THREADS`（单包连接默认 4）、`DOWNLOAD_CHUNK_SIZE_MB`（分段默认 4 MiB）、`GARUPA_PROXY_URL`（显式代理或 direct；留空优先标准代理环境变量，再检测 macOS 系统代理（30 秒缓存，遵守 NO_PROXY / 系统绕过规则））
 - Schema 来源：从游戏侧导出的 `proto/CE.proto`

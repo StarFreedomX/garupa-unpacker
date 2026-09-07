@@ -11,7 +11,7 @@
  * 所有远端素材落盘缓存到 assets/view/cache/，二次运行命中缓存直接读取。
  * 网络失败降级：卡框 → 不叠加（返回 null，调用方跳过）；图标 → 属性色圆点（返回 null）。
  */
-import axios from "axios";
+import { networkGet } from "../network.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadImage, type Image } from "skia-canvas";
@@ -53,7 +53,7 @@ function ensureCacheDir(): void {
 
 /** 拉取字节（UA=Mozilla/5.0） */
 async function fetchBytes(url: string): Promise<Buffer> {
-  const res = await axios.get(url, {
+  const res = await networkGet(url, {
     responseType: "arraybuffer",
     headers: { "User-Agent": UA },
     timeout: 20000,
