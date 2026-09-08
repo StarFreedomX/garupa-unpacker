@@ -11,16 +11,16 @@ proto/
     ├── CE.js                     # 由 CE.proto 编译生成（protobufjs pbjs 静态模块，~30 MB，勿手改）
     └── CE.d.ts                   # 由 CE.js 生成（pbts，~9.6 MB）
 src/
-├── index.ts                      # 一键流程：下载清单→对比→bundle 内存流水线→扁平化
+├── index.ts                      # 一键流程：下载清单→对比→bundle 内存流水线→直接输出
 ├── downloadAssetBundleInfo.ts    # CLI：下载 AssetBundleInfo（留空 = 自动检测最新版）
-├── getAssets.ts                  # CLI：按 diff 边下载边解包、内存对比和音频解码 → assets/<版本>/{new,change}
+├── getAssets.ts                  # CLI：按 diff 边下载边解包、内存对比和音频解码 → assets/<版本>/
 ├── compare.ts                    # CLI：对比 AssetBundleInfo 两个版本 → compare/diff_<旧>_to_<新>.json
 ├── export.ts                     # CLI：旧本地 bundle 内存解包（node-asset-studio-mod-js）+ getDefaultPaths(version?)
-├── memoryAssets.ts              # Buffer 下载/解包、ACB/AWB 分片合并、HCA→WAV、内存比较、最终输出事务
+├── memoryAssets.ts              # Buffer 下载/解包、ACB/AWB 分片合并、HCA→WAV、内存比较、直接输出及预览输出事务
 ├── removeUnchangedFiles.ts       # CLI：比对 change_old/change 删除内容未变的文件
 ├── mergeBytes.ts                 # CLI：合并分段 .acb（-001/-002 分片）
 ├── decodeAcb.ts                  # CLI：解 .acb 并解码 HCA → wav，change 与 change_old 同步解码去重
-├── flatFolder.ts                 # CLI：把「只有单个子文件夹」的层级压平
+├── flatFolder.ts                 # CLI：手动把「只有单个子文件夹」的层级压平，index 不调用
 ├── downloadChart.ts              # CLI：按 bgmNumber 下载对应 musicscore 谱面包并解包
 ├── suiteMaster.ts                # CLI：拉取 SuiteMaster → 写 JSON（编排用）
 └── garupa/
@@ -50,11 +50,11 @@ npx tsx src/suiteMaster.ts --output out/suite_master.json   # SuiteMaster → JS
 1. `downloadAB(输入)` 确定本次运行的版本（输入版本号 / 完整 URL / 留空自动检测）→ 下载 AssetBundleInfo
 2. `compareVersions(result.version)` 对比「输入版本 vs 其前一个版本」→ `compare/diff_<旧>_to_<新>.json`
 3. `downloadDiffAssets(PROJECT_ROOT, outFile, diff)` 直接接收内存 diff，按 bundle 限制并发：Buffer 下载 → `readAssets` → ACB/AWB 合并 → ACB 音轨 Buffer → HCA `decodeToMemory` → 最终文件内存对比 → 仅写变化文件。
-4. 最终文件先写临时输出目录，全部成功后替换 `assets/<新版本>/{new,change}`；失败不替换输出、不更新 nowDataVersion。没有 analysing/change_old/ACB/HCA 中间产物，重跑重新下载。
-5. 分类目录压平（保留版本根目录），重新读取 store 后更新 nowDataVersion。
+4. 最终文件直接写入 `assets/<新版本>/`，保留原目录结构，不区分 new/change 输出层级、不扁平化；失败保留已写出的文件，不清空结果目录、不更新 nowDataVersion。没有 analysing/change_old/ACB/HCA 中间产物，重跑重新下载处理，覆盖本次产出的同路径文件。
+5. 全部成功后重新读取 store 并更新 nowDataVersion。
 
 `quickUnpack.ts` 和 `downloadChart.ts` 复用同一内存模块。`quick` 解完一个 bundle 立即筛选并写最终文件，不保留整批结果或 quick-tmp。
-`readAssets` 是完整 bundle 级内存 API，不是网络字节增量解析。网络统一使用 `src/network.ts` 的代理和全局请求预算；变化包新旧版本同时下载，单包支持校验版本的 Range 并发下载，下载完整后才解包。解包与在途版本对分别限制并发，失败时等待同组请求/任务退出再清理。每个解包请求使用独立 Worker，结束/失败后关闭；不能并发复用同一个 AssetExporter。
+`readAssets` 是完整 bundle 级内存 API，不是网络字节增量解析。网络统一使用 `src/network.ts` 的代理和全局请求预算；变化包新旧版本同时下载，单包支持校验版本的 Range 并发下载，下载完整后才解包。解包与在途版本对分别限制并发，失败时等待同组请求/任务退出，完整流程保留已写出的结果。每个解包请求使用独立 Worker，结束/失败后关闭；不能并发复用同一个 AssetExporter。
 `hca-decoder@1.6` 忽略 Buffer 的 byteOffset/byteLength，必须传入精确复制的 ArrayBuffer。比较在合并分片与音频解码之后进行，避免丢失未变化但仍需参与解码的分片。
 运行要求 Node.js 22+，无需 .NET；HCA 仍需本机扩展。验证：`yarn typecheck`、`yarn test`。
 

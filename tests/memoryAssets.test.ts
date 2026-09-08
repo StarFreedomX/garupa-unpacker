@@ -176,7 +176,7 @@ test('download retries transient failure, but 403/404 immediately reject', async
     }
 });
 
-test('diff pipeline pins both versions, unpacks completed downloads, deduplicates in memory, and keeps failures uncommitted', async t => {
+test('diff pipeline writes directly, retains partial success on 404, and supports reruns in one output directory', async t => {
     const root = await temporary(t);
     const oldVersion = '1.0.0.1', newVersion = '1.0.0.2';
     await fs.writeFile(path.join(root, 'AssetBundleInfoUrl.json'), JSON.stringify({ latest: {}, hashes: { '1.0.0': 'a'.repeat(64) } }));
@@ -191,29 +191,31 @@ test('diff pipeline pins both versions, unpacks completed downloads, deduplicate
         else process.env.ASSET_PIPELINE_CONCURRENCY = originalConcurrency;
     });
     const requests: string[] = [];
+    let missingAvailable = false;
     let releaseOld!: () => void;
     const oldDownload = new Promise<void>(resolve => { releaseOld = resolve; });
     axios.defaults.adapter = async config => {
         requests.push(config.url!);
+        if (config.url!.endsWith('/missing')) {
+            if (!missingAvailable) throw new AxiosError('missing', 'ERR_BAD_REQUEST', config, undefined,
+                { status: 404, statusText: 'missing', data: '', headers: {}, config });
+            return { data: textAssets({ recovered: 'now available' }), status: 200, statusText: 'OK', headers: {}, config };
+        }
         const old = config.url!.includes(`/${oldVersion}_`);
         const added = config.url!.endsWith('/added');
         if (old) await oldDownload;
-        const data = added ? textAssets({ addition: 'new resource' })
+        const data = added ? textAssets({ addition: 'new resource', edited: 'new text' })
             : textAssets({ same: 'stable', edited: old ? 'old text' : 'new text', ...(old ? {} : { newfile: 'new file' }) });
         return { data, status: 200, statusText: 'OK', headers: {}, config };
     };
-    const diff = { new: ['added'], change: ['changed'] };
+    const diff = { new: ['added', 'missing'], change: ['changed'] };
     const pending = downloadDiffAssets(root, diffFile, diff);
     try {
         // Keep one response pending and prove the other bundle is already unpacked/written.
         let completedWhileDownloading = false;
         for (let i = 0; i < 200; i++) {
-            const stages = await fs.readdir(path.join(root, 'assets')).catch(() => [] as string[]);
-            const stage = stages.find(name => name.startsWith(`.${newVersion}-`));
-            if (stage) {
-                const text = await fs.readFile(path.join(root, 'assets', stage, 'new/addition.txt'), 'utf8').catch(() => '');
-                if (text === 'new resource') { completedWhileDownloading = true; break; }
-            }
+            const text = await fs.readFile(path.join(root, 'assets', newVersion, 'addition.txt'), 'utf8').catch(() => '');
+            if (text === 'new resource') { completedWhileDownloading = true; break; }
             await new Promise(resolve => setTimeout(resolve, 10));
         }
         assert.ok(completedWhileDownloading, 'the completed bundle should unpack before all downloads finish');
@@ -223,16 +225,27 @@ test('diff pipeline pins both versions, unpacks completed downloads, deduplicate
         releaseOld();
     }
     const result = await pending;
-    assert.equal(result.failed, 0); assert.equal(result.total, 2);
-    assert.equal(requests.length, 3);
+    assert.equal(result.failed, 1); assert.equal(result.total, 3);
+    assert.equal(requests.length, 4);
     assert.equal(requests.filter(url => url.includes(`/${oldVersion}_`)).length, 1);
-    assert.deepEqual((await fs.readdir(path.join(result.output, 'change'))).sort(), ['edited.txt', 'newfile.txt']);
-    assert.equal(await fs.readFile(path.join(result.output, 'new/addition.txt'), 'utf8'), 'new resource');
+    assert.deepEqual((await fs.readdir(result.output)).sort(), ['addition.txt', 'edited.txt', 'newfile.txt']);
+    assert.equal(await fs.readFile(path.join(result.output, 'addition.txt'), 'utf8'), 'new resource');
     assert.deepEqual((await fs.readdir(root)).sort(), ['AssetBundleInfoUrl.json', 'assets']);
+    // Rerun into the existing directory: overwrite files without EEXIST, fill missing resources,
+    // and retain unrelated files instead of replacing the version directory.
+    await fs.writeFile(path.join(result.output, 'retained.txt'), 'keep');
+    await fs.writeFile(path.join(result.output, 'addition.txt'), 'incomplete previous write');
+    missingAvailable = true;
+    const retried = await downloadDiffAssets(root, diffFile, diff);
+    assert.equal(retried.failed, 0);
+    assert.equal(await fs.readFile(path.join(result.output, 'addition.txt'), 'utf8'), 'new resource');
+    assert.equal(await fs.readFile(path.join(result.output, 'recovered.txt'), 'utf8'), 'now available');
+    assert.equal(await fs.readFile(path.join(result.output, 'retained.txt'), 'utf8'), 'keep');
+    assert.deepEqual((await fs.readdir(result.output)).sort(), ['addition.txt', 'edited.txt', 'newfile.txt', 'recovered.txt', 'retained.txt']);
     axios.defaults.adapter = async config => ({ data: Buffer.from('broken bundle'), status: 200, statusText: 'OK', headers: {}, config });
     const failed = await downloadDiffAssets(root, diffFile, diff);
-    assert.equal(failed.failed, 2);
-    assert.equal(await fs.readFile(path.join(result.output, 'new/addition.txt'), 'utf8'), 'new resource');
+    assert.equal(failed.failed, 3);
+    assert.equal(await fs.readFile(path.join(result.output, 'addition.txt'), 'utf8'), 'new resource');
     assert.deepEqual(await fs.readdir(path.join(root, 'assets')), [newVersion]);
 });
 

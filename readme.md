@@ -45,11 +45,11 @@ yarn grp
 
 ### 常见资源路径
 
-* 卡牌颜色: `assets\9.4.0.120\new.assets.star.forassetbundle.asneeded.genericanimation\dream_festival_2512\name_text.png`
-* 新曲: `assets\9.4.0.120\new.assets.star.forassetbundle.asneeded\sound\ingamebgm`
-* 表情: `assets\9.4.0.120\change.assets.star.forassetbundle\startapp\stamp`
-* 语音表情: `assets\9.4.0.120\change.assets.star.forassetbundle\startapp\sound.voice`
-* 活动介绍: `assets\9.4.0.120\new.assets.star.forassetbundle.asneeded\event\challengeevent.new_year_2026\slide`
+* 卡牌颜色: `assets\9.4.0.120\assets\star\forassetbundle\asneeded\genericanimation\dream_festival_2512\name_text.png`
+* 新曲: `assets\9.4.0.120\assets\star\forassetbundle\asneeded\sound\ingamebgm`
+* 表情: `assets\9.4.0.120\assets\star\forassetbundle\startapp\stamp`
+* 语音表情: `assets\9.4.0.120\assets\star\forassetbundle\startapp\sound\voice`
+* 活动介绍: `assets\9.4.0.120\assets\star\forassetbundle\asneeded\event\challengeevent\new_year_2026\slide`
 
 ### 内存流水线
 
@@ -58,13 +58,13 @@ yarn grp
 1. 下载一个 bundle 到 Buffer，立即用 `readAssets` 解包；其他 bundle 可以继续下载。
 2. 在内存中合并同一 bundle 的 ACB / AWB 分片，直接将 ACB 音轨 Buffer 交给 HCA 解码器，得到 WAV Buffer。
 3. 对变化 bundle 的新旧版本按最终文件相对路径和字节内容比较，只写新增或变化的文件；音频比较最终 WAV，完整分片会在比较前保留。
-4. 写到 `assets/<新版本>/{new,change}/`，一键流程再压平分类下的目录。全部成功后更新 `nowDataVersion`。
+4. 将最终文件直接写到 `assets/<新版本>/`，保留资源原有目录结构，不区分 `new` / `change` 输出目录，也不压平路径。全部成功后更新 `nowDataVersion`。
 
 JS 引擎 0.1.2 起，Shader 正常导出为内存中的 `.shader` 文本，参与最终文件比较；这是供检查的 ShaderLab 文本，不保证能作为原始源码重新编译。仍不支持转换的 Texture2DArray、MovieTexture、Animator 会以 `.bin` 保留原始序列化字节（不附带外部资源流）；解析错误仍会报错。
 
 同一 bundle 中的同名 Unity 对象保留 ` @PathID` 后缀，避免覆盖；其余资源恢复普通文件名，以兼容图片筛选和 ACB 分片合并。
 
-不再生成 `analysing/`、`change_old/` 或中间 ACB/HCA 文件。版本清单和 diff JSON 仍保留，编排直接传递内存中的 diff。最终文件先写入同级临时输出目录，所有任务成功后替换目标版本目录；失败保留上次成功输出及版本记录，重跑会重新下载处理。
+不再生成 `analysing/`、`change_old/` 或中间 ACB/HCA 文件。版本清单和 diff JSON 仍保留，编排直接传递内存中的 diff。每个 bundle 完成后直接写入结果目录，可立即读取；部分资源下载或解包失败不删除已写出的文件，也不清空已有结果目录，`nowDataVersion` 仅在全部成功后更新。重跑仍会重新下载处理整批差异包，覆盖本次产出的同路径文件并补齐资源，其余已有文件保留。同一轮中多个 bundle 输出相同路径时，内容相同只写一次，内容不同则报重名错误。
 
 这里的“边下载边解包”以 **bundle 为单位**：当前接口需要完整 bundle Buffer，不能在同一个 bundle 只下载了一部分时解析。每个任务完成后释放数据，不缓存整批下载结果。变化包的新旧版本同时下载、分别解包，完成后在内存比较。默认最多 4 个 bundle / 版本对在途（变化包最多 8 份数据），快捷流程可用 `QUICK_UNPACK_CONCURRENCY` 单独覆盖这个上限。
 
@@ -103,10 +103,10 @@ macOS 自动检测读取 `scutil --proxy`，支持 HTTP、HTTPS、SOCKS、显式
 yarn dab   # 下载版本清单
 yarn com   # 比较清单并保存 diff
 yarn geta  # 下载 + 内存解包 + 去重 + 音频解码，直接输出最终文件
-yarn ff    # 可选：压平输出目录
+yarn ff    # 可选：手动压平输出目录，完整流程不自动调用
 ```
 
-`yarn exp` 仅用于已有的 `analysing/<版本>/{new,change,change_old}` 本地 bundle，也会在内存中比较、解码后输出。`yarn rmuf`、`yarn mb`、`yarn da` 继续保留用于旧磁盘产物；新流程不需要再次运行这些步骤。原来的 `REMOVE_OLD_FILES` / `REMOVE_ANALYSING_FILES` 开关不再用于新流程。
+`yarn exp` 仅用于已有的 `analysing/<版本>/{new,change,change_old}` 本地 bundle，也会在内存中比较、解码后直接输出到 `assets/<版本>/`，失败保留成功结果。`yarn rmuf`、`yarn mb`、`yarn da` 继续保留用于旧磁盘产物；新流程不需要再次运行这些步骤。原来的 `REMOVE_OLD_FILES` / `REMOVE_ANALYSING_FILES` 开关不再用于新流程。
 
 ### 耗时统计
 

@@ -2,7 +2,6 @@ import { fileURLToPath } from "url";
 import { downloadAB, refreshAppData } from "@/downloadAssetBundleInfo.js";
 import { compareVersions, listDownloadedVersions } from "@/compare.js";
 import { downloadDiffAssets } from "@/getAssets.js";
-import { flatFolder } from "@/flatFolder.js";
 import { loadStore, saveStore, extractVersionFromUrl } from "@/garupa/assetBundleInfo.js";
 import path from "path";
 import dotenv from "dotenv";
@@ -166,13 +165,7 @@ async function main() {
             console.log('边下载边解包，在内存中去重并解码音频...');
             const result = await downloadDiffAssets(PROJECT_ROOT, outFile, diff);
             if (result.failed > 0) {
-                throw new Error(`处理失败 ${result.failed}/${result.total} 个 bundle；原输出保持不变，重跑会重新下载处理`);
-            }
-
-            console.log('扁平化路径...');
-            // Keep assets/<version> stable even when only one category is present.
-            for (const entry of await fs.promises.readdir(result.output, { withFileTypes: true })) {
-                if (entry.isDirectory()) await flatFolder(path.join(result.output, entry.name));
+                throw new Error(`处理失败 ${result.failed}/${result.total} 个 bundle；已写出的结果保留在 ${result.output}，重跑会重新下载处理`);
             }
 
             // 提交点：解包全部成功后更新本机当前已解包版本

@@ -4,7 +4,7 @@ import path from "path";
 import type { ExportAssetsDefaultConfig } from "node-asset-studio-mod-js";
 import { glob } from "glob";
 import pLimit from "p-limit";
-import { changedFiles, pipelineConcurrency, unpackBundle, withStagedOutput, createMemoryWriter } from "./memoryAssets.js";
+import { changedFiles, pipelineConcurrency, unpackBundle, createMemoryWriter } from "./memoryAssets.js";
 import {fileURLToPath} from "url";
 
 const isMainProcess = process.argv[1] === fileURLToPath(import.meta.url);
@@ -80,26 +80,24 @@ export async function exportLatestAssets(config?: Partial<ExportAssetsDefaultCon
     const { input, output } = getDefaultPaths(version ?? getLatestVersionFolder(ANALYSING_DIR) ?? undefined);
 
     if (!fs.existsSync(input)) throw new Error(`没有本地 bundle: ${input}；在线下载解包请运行 yarn geta`);
-    await withStagedOutput(output, async stage => {
-        const writeFiles = createMemoryWriter(stage);
-        const limit = pLimit(pipelineConcurrency());
-        const tasks = ['new', 'change'].flatMap(category => {
-            const root = path.join(input, category);
-            const files = glob.sync('**/*', { cwd: root, nodir: true })
-                .filter(name => !/\.(resS|resource)$/i.test(name));
-            return files.map(name => limit(async () => {
-                const oldPath = path.join(input, 'change_old', name);
-                const previous = category === 'change' && fs.existsSync(oldPath)
-                    ? await unpackBundle(oldPath, config) : new Map<string, Buffer>();
-                const current = await unpackBundle(path.join(root, name), config);
-                await writeFiles(changedFiles(current, previous), category);
-            }));
-        });
-        // Wait for every writer before cleaning up a failed staging directory.
-        const results = await Promise.allSettled(tasks);
-        const errors = results.filter(r => r.status === 'rejected').map(r => r.reason);
-        if (errors.length) throw new AggregateError(errors, '本地 bundle 解包失败');
+    const writeFiles = createMemoryWriter(output);
+    const limit = pLimit(pipelineConcurrency());
+    const tasks = ['new', 'change'].flatMap(category => {
+        const root = path.join(input, category);
+        const files = glob.sync('**/*', { cwd: root, nodir: true })
+            .filter(name => !/\.(resS|resource)$/i.test(name));
+        return files.map(name => limit(async () => {
+            const oldPath = path.join(input, 'change_old', name);
+            const previous = category === 'change' && fs.existsSync(oldPath)
+                ? await unpackBundle(oldPath, config) : new Map<string, Buffer>();
+            const current = await unpackBundle(path.join(root, name), config);
+            await writeFiles(changedFiles(current, previous));
+        }));
     });
+    // Finish every task and retain successfully written files even if another bundle fails.
+    const results = await Promise.allSettled(tasks);
+    const errors = results.filter(r => r.status === 'rejected').map(r => r.reason);
+    if (errors.length) throw new AggregateError(errors, '本地 bundle 解包失败');
 }
 
 

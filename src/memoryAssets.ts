@@ -188,7 +188,7 @@ export async function downloadBundle(baseUrl: string, name: string, client: Axio
     return downloadAsset(url, client);
 }
 
-/** Deduplicate shared output paths using in-memory hashes; serialize identical concurrent writes. */
+/** Deduplicate paths within a run; overwrite matching destinations on reruns without clearing other output. */
 export function createMemoryWriter(root: string) {
     const written = new Map<string, { digest: string; done: Promise<void> }>();
     return async (files: MemoryFiles, prefix = ''): Promise<void> => {
@@ -204,7 +204,7 @@ export function createMemoryWriter(root: string) {
             const destination = path.join(root, relative);
             const done = (async () => {
                 await fs.mkdir(path.dirname(destination), { recursive: true });
-                await fs.writeFile(destination, data, { flag: 'wx' });
+                await fs.writeFile(destination, data);
             })();
             written.set(relative, { digest, done });
             await done;

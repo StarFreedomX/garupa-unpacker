@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { glob } from 'glob';
 import pLimit from 'p-limit';
 import { mainVersion, buildAssetBundleUrl, loadStore } from "@/garupa/assetBundleInfo.js";
-import { changedFiles, downloadBundle, pipelineConcurrency, unpackBundle, withStagedOutput, createMemoryWriter, type UnpackTimings } from "./memoryAssets.js";
+import { changedFiles, downloadBundle, pipelineConcurrency, unpackBundle, createMemoryWriter, type UnpackTimings } from "./memoryAssets.js";
 import { integerSetting } from "./network.js";
 import type { AssetDiff } from "./compare.js";
 
@@ -113,71 +113,65 @@ export async function downloadDiffAssets(PROJECT_ROOT: string, diffFile?: string
     const failures: Error[] = [];
     console.log(`开始内存流水线 NEW(${diffJson.new.length}) + CHANGE(${diffJson.change.length} 对) ...`);
     console.log(`并发设置：流水线 ${pipelineConcurrency()}，网络请求 ${integerSetting('DOWNLOAD_CONCURRENCY', 8, 64)}，单包分段 ${integerSetting('DOWNLOAD_THREADS', 4, 16)}，解包 ${integerSetting('UNPACK_CONCURRENCY', 4)}`);
-    try {
-        await withStagedOutput(output, async stage => {
-            const writeFiles = createMemoryWriter(stage);
-            const limit = pLimit(pipelineConcurrency());
-            const unpack = pLimit(integerSetting('UNPACK_CONCURRENCY', 4));
-            const run = (name: string, category: 'new' | 'change') => limit(async () => {
-                const started = performance.now();
-                const timing: BundleTimings = {
-                    name, category, queueMs: started - pipelineStarted, totalMs: 0,
-                    compareMs: 0, writeMs: 0, writtenFiles: 0, versions: [],
-                };
-                bundles.push(timing);
-                const load = async (baseUrl: string, version: string) => {
-                    const item: VersionTimings = { version, downloadMs: 0, downloadBytes: 0, unpackQueueMs: 0, exportMs: 0, finalizeMs: 0, fileCount: 0, outputBytes: 0 };
-                    timing.versions.push(item);
-                    const begin = performance.now();
-                    const bytes = await downloadBundle(baseUrl, name);
-                    item.downloadMs = performance.now() - begin;
-                    item.downloadBytes = bytes.length;
-                    console.log(`[下载] ${version}/${name}: ${(item.downloadMs / 1000).toFixed(2)}s，${(bytes.length / 1048576).toFixed(2)}MiB`);
-                    const queued = performance.now();
-                    const files = await unpack(() => {
-                        item.unpackQueueMs = performance.now() - queued;
-                        return unpackBundle(bytes, {}, item);
-                    });
-                    console.log(`[解包] ${version}/${name}: ${(item.exportMs / 1000).toFixed(2)}s，后处理 ${(item.finalizeMs / 1000).toFixed(2)}s，${files.size} 个文件`);
-                    return files;
-                };
-                try {
-                    // Keep a bounded number of pairs in flight, but download both versions concurrently.
-                    // Drain both sides even on failure before releasing the pair's pipeline slot.
-                    const results = await Promise.allSettled([
-                        category === 'change' ? load(baseUrlOld, oldVersion) : Promise.resolve(new Map<string, Buffer>()),
-                        load(baseUrlNew, newVersion),
-                    ]);
-                    const rejected = results.find(result => result.status === 'rejected');
-                    if (rejected?.status === 'rejected') throw rejected.reason;
-                    const [previous, current] = results.map(result => (result as PromiseFulfilledResult<Map<string, Buffer>>).value);
-                    const compareStarted = performance.now();
-                    const files = changedFiles(current, previous);
-                    timing.compareMs = performance.now() - compareStarted;
-                    const writeStarted = performance.now();
-                    await writeFiles(files, category);
-                    timing.writeMs = performance.now() - writeStarted;
-                    timing.writtenFiles = files.size;
-                    console.log(`[完成] ${category}/${name}: 写出 ${files.size}，未变化 ${current.size - files.size}`);
-                } catch (error) {
-                    const failure = new Error(`${category}/${name}: ${error instanceof Error ? error.message : error}`);
-                    failures.push(failure);
-                    timing.error = failure.message;
-                    console.error(`[失败] ${failure.message}`);
-                } finally {
-                    timing.totalMs = performance.now() - started;
-                }
+    await fs.mkdir(output, { recursive: true });
+    const writeFiles = createMemoryWriter(output);
+    const limit = pLimit(pipelineConcurrency());
+    const unpack = pLimit(integerSetting('UNPACK_CONCURRENCY', 4));
+    const run = (name: string, category: 'new' | 'change') => limit(async () => {
+        const started = performance.now();
+        const timing: BundleTimings = {
+            name, category, queueMs: started - pipelineStarted, totalMs: 0,
+            compareMs: 0, writeMs: 0, writtenFiles: 0, versions: [],
+        };
+        bundles.push(timing);
+        const load = async (baseUrl: string, version: string) => {
+            const item: VersionTimings = { version, downloadMs: 0, downloadBytes: 0, unpackQueueMs: 0, exportMs: 0, finalizeMs: 0, fileCount: 0, outputBytes: 0 };
+            timing.versions.push(item);
+            const begin = performance.now();
+            const bytes = await downloadBundle(baseUrl, name);
+            item.downloadMs = performance.now() - begin;
+            item.downloadBytes = bytes.length;
+            console.log(`[下载] ${version}/${name}: ${(item.downloadMs / 1000).toFixed(2)}s，${(bytes.length / 1048576).toFixed(2)}MiB`);
+            const queued = performance.now();
+            const files = await unpack(() => {
+                item.unpackQueueMs = performance.now() - queued;
+                return unpackBundle(bytes, {}, item);
             });
-            await Promise.all([
-                ...diffJson.new.map(name => run(name, 'new')),
-                ...diffJson.change.map(name => run(name, 'change')),
+            console.log(`[解包] ${version}/${name}: ${(item.exportMs / 1000).toFixed(2)}s，后处理 ${(item.finalizeMs / 1000).toFixed(2)}s，${files.size} 个文件`);
+            return files;
+        };
+        try {
+            // Keep a bounded number of pairs in flight, but download both versions concurrently.
+            // Drain both sides even on failure before releasing the pair's pipeline slot.
+            const results = await Promise.allSettled([
+                category === 'change' ? load(baseUrlOld, oldVersion) : Promise.resolve(new Map<string, Buffer>()),
+                load(baseUrlNew, newVersion),
             ]);
-            if (failures.length) throw new AggregateError(failures, '资源流水线失败');
-        });
-    } catch (error) {
-        if (!(error instanceof AggregateError) || !failures.length) throw error;
-    }
-    console.log(`处理完成（成功 ${total - failures.length}/${total} 个 bundle）；${failures.length ? '原输出保持不变' : output}`);
+            const rejected = results.find(result => result.status === 'rejected');
+            if (rejected?.status === 'rejected') throw rejected.reason;
+            const [previous, current] = results.map(result => (result as PromiseFulfilledResult<Map<string, Buffer>>).value);
+            const compareStarted = performance.now();
+            const files = changedFiles(current, previous);
+            timing.compareMs = performance.now() - compareStarted;
+            const writeStarted = performance.now();
+            await writeFiles(files);
+            timing.writeMs = performance.now() - writeStarted;
+            timing.writtenFiles = files.size;
+            console.log(`[完成] ${category}/${name}: 写出 ${files.size}，未变化 ${current.size - files.size}`);
+        } catch (error) {
+            const failure = new Error(`${category}/${name}: ${error instanceof Error ? error.message : error}`);
+            failures.push(failure);
+            timing.error = failure.message;
+            console.error(`[失败] ${failure.message}`);
+        } finally {
+            timing.totalMs = performance.now() - started;
+        }
+    });
+    await Promise.all([
+        ...diffJson.new.map(name => run(name, 'new')),
+        ...diffJson.change.map(name => run(name, 'change')),
+    ]);
+    console.log(`处理完成（成功 ${total - failures.length}/${total} 个 bundle）；结果已保留：${output}`);
     return { total, failed: failures.length, output, timings: { totalMs: performance.now() - pipelineStarted, bundles } };
 }
 
