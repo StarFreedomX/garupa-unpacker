@@ -124,7 +124,7 @@ export async function unpackBundle(input: AssetInput, config: ExportAssetsDefaul
     let selected: AssetType[] = requested.includes('all') ? AssetTypes.filter(type => type !== 'all') : requested;
     const rawTypes: AssetType[] = [];
     const unsupported: Record<string, AssetType> = {
-        Shader: 'shader', Texture2DArray: 'tex2dArray', MovieTexture: 'movietexture', Animator: 'animator',
+        Texture2DArray: 'tex2dArray', MovieTexture: 'movietexture', Animator: 'animator',
     };
     let result: Awaited<ReturnType<typeof readAssets>>;
     for (;;) {

@@ -35,7 +35,7 @@
     "glob": "^13.0.0",
     "hca-decoder": "^1.6.0",
     "long": "^5.3.2",
-    "node-asset-studio-mod-js": "^0.1.1",
+    "node-asset-studio-mod-js": "^0.1.2",
     "p-limit": "^7.2.0",
     "protobufjs": "^8.7.1",
     "proxy-agent": "^8.0.2",

@@ -117,14 +117,18 @@ test('same-name Unity objects keep PathIDs while unique assets retain their orig
     assert.deepEqual([...explicit.keys()], ['1.txt', '2.txt', '3.txt']);
 });
 
-test('unsupported Shader conversion retains exact serialized bytes instead of failing or dropping it', async () => {
+test('Shader exports readable ShaderLab in memory; raw bytes require explicit exportRaw', async () => {
     const input = textAssets({ shader: '' }, 48);
-    const expected = input.subarray(input.readUInt32BE(12));
     const files = await unpackBundle(input);
-    assert.deepEqual([...files.keys()], ['shader.bin']);
-    assert.deepEqual(files.get('shader.bin'), expected);
+    assert.deepEqual([...files.keys()], ['shader.shader']);
+    const source = files.get('shader.shader')!.toString('utf8');
+    assert.match(source, /Shader "" \{/);
+    assert.match(source, /Properties \{/);
     const shaderOnly = await unpackBundle(input, { assetType: 'shader' });
-    assert.deepEqual(shaderOnly.get('shader.bin'), expected);
+    assert.deepEqual(shaderOnly.get('shader.shader'), files.get('shader.shader'));
+    const raw = await unpackBundle(input, { assetType: 'shader', mode: 'exportRaw' });
+    assert.deepEqual([...raw.keys()], ['shader.bin']);
+    assert.deepEqual(raw.get('shader.bin'), input.subarray(input.readUInt32BE(12)));
 });
 
 test('concurrent output collisions are compared in memory and identical writes finish together', async t => {
