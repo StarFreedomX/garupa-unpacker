@@ -16,6 +16,7 @@
     "grp": "npx tsx ./src/index.ts",
     "quick": "npx tsx ./src/quickUnpack.ts",
     "quick-master": "npx tsx ./src/quickMaster.ts",
+    "probe:cdn": "tsx ./src/probeCdn.ts",
     "server": "concurrently --kill-others-on-fail --names notify,unpack --prefix-colors cyan,magenta \"yarn server:notify\" \"yarn server:unpack\"",
     "server:notify": "npx tsx ./src/unpackServer.ts",
     "server:unpack": "npx tsx ./src/unpackWorker.ts",

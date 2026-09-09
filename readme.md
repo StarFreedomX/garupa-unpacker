@@ -89,6 +89,15 @@ SuiteMaster 时仍会按清单差异中的卡牌 resource set 和事先建立的
 `out/unpack-server-state.json`。进程重启后只补失败项。健康接口提供当前 application 版本、
 猜测版本、各周期完成数与最近错误。
 
+需要手动快速确认某个版本是否已部署 CDN 清单时，只探测一次且不解包、不发送：
+
+```shell
+yarn probe:cdn 10.1.0.310
+```
+
+退出码 `0` 表示清单存在且可解析，`1` 表示 CDN 返回 403/404、尚未就绪，`2` 表示参数、hash
+或网络异常。该命令与常驻服务共用 `.env` 中的代理设置及 CDN hash 解析逻辑。
+
 ### 常见资源路径
 
 * 卡牌颜色: `assets\9.4.0.120\assets\star\forassetbundle\asneeded\genericanimation\dream_festival_2512\name_text.png`
