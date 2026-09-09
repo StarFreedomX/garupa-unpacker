@@ -34,7 +34,7 @@ cd garupa-unpacker
 # 安装
 yarn install
 
-# yarn install 会自动生成 proto/gen；仅在手动修改 proto/CE.proto 后需要再次运行
+# 首次运行或 proto/CE.proto 更新后手动生成；命令会自动创建 proto/gen
 yarn gen:proto
 ```
 

@@ -21,7 +21,6 @@
     "server:unpack": "npx tsx ./src/unpackWorker.ts",
     "upsnap": "npx tsx ./src/updateSnapshots.ts",
     "gen:proto": "mkdir -p proto/gen && pbjs -t static-module -w es6 -o proto/gen/CE.js proto/CE.proto && pbts -o proto/gen/CE.d.ts proto/gen/CE.js",
-    "postinstall": "npm run gen:proto",
     "test": "node --import tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
