@@ -23,6 +23,9 @@ src/
 ├── flatFolder.ts                 # CLI：手动把「只有单个子文件夹」的层级压平，index 不调用
 ├── downloadChart.ts              # CLI：按 bgmNumber 下载对应 musicscore 谱面包并解包
 ├── suiteMaster.ts                # CLI：拉取 SuiteMaster → 写 JSON（编排用）
+├── unpackServer.ts               # 常驻探测/application/SuiteMaster/目标筛选/OneBot 发送 + health
+├── unpackWorker.ts               # 独立常驻全量差异解包；只落新增/修改文件并写逐 bundle 索引
+├── unpackServer/                 # 两进程共享配置、状态、目标筛选、通知、master 与索引模块
 └── garupa/
     ├── assetBundleInfo.ts        # AssetBundleInfoUrl.json 存取 + URL 构造（共享模块）
     ├── config.ts                 # dotenv、AES 密钥懒加载、常量、请求头
@@ -43,8 +46,10 @@ npx tsx src/compare.ts                                      # 对比（交互式
 npx tsx src/getAssets.ts                                    # 按最新 diff 下载差异资源
 npx tsx src/downloadChart.ts <bgmNumber>                    # 下载并解包指定歌曲谱面
 npx tsx src/suiteMaster.ts --output out/suite_master.json   # SuiteMaster → JSON
+yarn server:notify                                          # 探测版本，只筛选/发送目标资源
+yarn server:unpack                                          # 解开本次全部新增/变化 bundle
 ```
-（package.json scripts：`yarn grp` = index、`yarn dab` = downloadAssetBundleInfo、`yarn com` = compare、`yarn geta` = getAssets、`yarn exp` = export、`yarn rmuf` = removeUnchangedFiles、`yarn mb` = mergeBytes、`yarn da` = decodeAcb、`yarn ff` = flatFolder）
+（package.json scripts：`yarn grp` = index、`yarn dab` = downloadAssetBundleInfo、`yarn com` = compare、`yarn geta` = getAssets、`yarn exp` = export、`yarn rmuf` = removeUnchangedFiles、`yarn mb` = mergeBytes、`yarn da` = decodeAcb、`yarn ff` = flatFolder、`yarn server:notify` = 探测发送、`yarn server:unpack` = 常驻全解）
 
 ### 一键流程（index.ts）
 1. `downloadAB(输入)` 确定本次运行的版本（输入版本号 / 完整 URL / 留空自动检测）→ 下载 AssetBundleInfo

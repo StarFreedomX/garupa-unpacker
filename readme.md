@@ -43,6 +43,52 @@ yarn gen:proto
 yarn grp
 ```
 
+### 实时预解包 Server
+
+实时链路拆成两个可独立重启的进程：`server:notify` 负责探测、严格筛选目标和发送，
+`server:unpack` 负责把本次更新的全部新增/变化 bundle 解开。变化 bundle 会在内存中与旧包
+比较，只把新增/修改文件写盘；索引只用 `new: true/false` 区分新增与修改，不保留 unchanged。
+探测进程不会自己解包，
+两个进程通过持久状态和逐 bundle 完成索引衔接。
+
+`yarn server:notify` 会同时轮询游戏 `/application` 与 CDN 上的猜测版本。猜测规则为版本末段通常
+`+10`，尾数为 `90` 时 `+20`。目标 `AssetBundleInfo` 提前出现后，服务只用清单差异定位下列
+目标资源所在的 bundle（不会发送清单里的其他差异）。`yarn server:unpack` 随即并发处理全部
+新增/变化 bundle；尚未部署的 bundle 会在之后的轮询中重试，不会挡住已经完成的 bundle。
+探测进程看到某个 bundle 的完成索引后立即发送其中的目标文件，不等待整次全解结束。
+
+```shell
+cp .env.example .env
+# 至少填写 GARUPA_AES_KEY / GARUPA_AES_IV / ONEBOT_API_BASE_URL / ONEBOT_GROUP_IDS
+# 生产运行：一个命令同时启动探测/发送进程与全量解包进程
+yarn server
+curl http://127.0.0.1:3210/health
+```
+
+如需分别调试两个进程，也可以在两个终端单独运行 `yarn server:notify` 和
+`yarn server:unpack`。`yarn server` 收到 Ctrl+C 时会一并停止两个子进程；其中任一进程异常退出时，
+另一进程也会被停止，便于由外部进程管理器整体拉起。
+
+OneBot 配置完全来自环境变量。图片使用 `send_group_msg` 的 base64 消息段；语音表情和普通文件
+使用 `upload_group_file`，便于群内转发。未配置公开文件 URL 时以 `base64://` 跨进程传输。如果文件较大，
+可设置 `ONEBOT_FILE_BASE_URL`，把 `UNPACK_SERVER_OUTPUT_DIR` 映射成 NapCat 可访问的 HTTP 目录，
+让 NapCat 直接从 URL 拉取，避免 base64 的额外内存开销。
+设置 `ONEBOT_MERGE_BUNDLE_IMAGES=true` 后，同一 bundle 解包批次中的多张图片会合并成一条
+OneBot 消息；音频和普通文件仍单独发送。不开启时每张图片单独发送。本地联调可设置
+`UNPACK_SERVER_DRY_RUN=true`，此时不会发送外部消息。
+历史版本回放可在隔离的输出和状态上设置 `UNPACK_SERVER_HISTORICAL_REPLAY=true`，使用较新
+SuiteMaster 时仍会按清单差异中的卡牌 resource set 和事先建立的歌曲 ID 基线过滤，不会把后续内容混入目标版本。
+
+服务处理并实时发送：新卡面、当期卡牌角色及颜色、新增表情和语音表情（聚合包按新旧最终文件
+比较，修改项不会发送）、活动介绍图、新曲完整 jacket/完整音频（缩略图、chorus 试听和原始谱面不发送）、`thumb/degree` 中新增且
+文件名为 `degree_event*` 的当期活动牌子。官方
+`application` 更新后，服务再访问 SuiteMaster，发送新曲文字信息并直接用已解包的缩略图
+生成 `view/overview.png` 三围技能图；这一阶段不会调用 quick/view CLI，也不会重复解包。
+
+输出位于 `assets/server/<dataVersion>/`，发送去重和失败状态持久化在
+`out/unpack-server-state.json`。进程重启后只补失败项。健康接口提供当前 application 版本、
+猜测版本、各周期完成数与最近错误。
+
 ### 常见资源路径
 
 * 卡牌颜色: `assets\9.4.0.120\assets\star\forassetbundle\asneeded\genericanimation\dream_festival_2512\name_text.png`

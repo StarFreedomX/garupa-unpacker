@@ -12,7 +12,7 @@ export interface AssetDiff { new: string[]; change: string[] }
 type AssetMap = Map<string, string>;
 
 
-function extractPathAndHash(line: string) {
+export function extractPathAndHash(line: string) {
     const hashMatch = line.match(/@([a-fA-F0-9]{64})/);
     if (!hashMatch) return null;
     const hashValue = hashMatch[1];
@@ -22,6 +22,25 @@ function extractPathAndHash(line: string) {
     if (!matches.length) return null;
 
     return { path: matches[matches.length - 1][0], hashValue };
+}
+
+/** 直接解析内存中的 AssetBundleInfo；常驻服务用它探测 CDN，不需要先落盘。 */
+export function parseAssetBundleInfo(input: Buffer | string): AssetMap {
+    const data: AssetMap = new Map();
+    const text = typeof input === "string" ? input : input.toString("utf-8");
+    for (const line of text.split(/\r?\n/)) {
+        const parsed = extractPathAndHash(line);
+        if (parsed) data.set(parsed.path, parsed.hashValue);
+    }
+    return data;
+}
+
+/** 比较两个已解析的清单，方向为 previous → current。 */
+export function compareAssetMaps(current: AssetMap, previous: AssetMap): AssetDiff {
+    return {
+        new: [...current.keys()].filter(p => !previous.has(p)).sort(),
+        change: [...current.keys()].filter(p => previous.has(p) && current.get(p) !== previous.get(p)).sort(),
+    };
 }
 
 async function readFileToAssetMap(filePath: string): Promise<AssetMap> {
@@ -87,8 +106,9 @@ export async function compareVersions(verNew: string, verOld: string) {
     const oldMap = await readFileToAssetMap(oldFile);
     const newMap = await readFileToAssetMap(newFile);
 
-    const added = [...newMap.keys()].filter(p => !oldMap.has(p)).sort();
-    const changed = [...newMap.keys()].filter(p => oldMap.has(p) && newMap.get(p) !== oldMap.get(p)).sort();
+    const compared = compareAssetMaps(newMap, oldMap);
+    const added = compared.new;
+    const changed = compared.change;
 
     await fs.mkdir(OUT_DIR, { recursive: true });
     const outFile = path.join(OUT_DIR, `diff_${verOld}_to_${verNew}.json`);

@@ -1,8 +1,8 @@
 {
   "latest": {
     "clientVersion": "10.1.4",
-    "dataVersion": "10.1.0.250",
-    "masterDataVersion": "10.1.0.250"
+    "dataVersion": "10.1.0.290",
+    "masterDataVersion": "10.1.0.292"
   },
   "nowDataVersion": "10.1.0.250",
   "hashes": {
@@ -16,8 +16,8 @@
   },
   "snapshots": {
     "10.1.4": {
-      "dataVersion": "10.1.0.250",
-      "masterDataVersion": "10.1.0.250"
+      "dataVersion": "10.1.0.290",
+      "masterDataVersion": "10.1.0.292"
     }
   }
 }

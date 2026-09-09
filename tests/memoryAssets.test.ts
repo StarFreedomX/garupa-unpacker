@@ -40,6 +40,20 @@ test('ACB → cue HCA slices → final WAV uses the real parsers', async () => {
     assertWav(files.get('voice_01.wav')!);
 });
 
+test('Unity TextAsset .acb.bytes archives are decoded before final comparison', async () => {
+    const old = audioArchive([{ name: 'existing', data: silenceHca() }]);
+    const current = audioArchive([
+        { name: 'existing', data: silenceHca() },
+        { name: 'new_stamp', data: silenceHca(48000) },
+    ]);
+    const files = changedFiles(
+        await finalizeAssets(new Map([['VoiceStamp.acb.bytes', current.acb]])),
+        await finalizeAssets(new Map([['VoiceStamp.acb.bytes', old.acb]])),
+    );
+    assert.deepEqual([...files.keys()], ['VoiceStamp/new_stamp.wav']);
+    assertWav(files.get('VoiceStamp/new_stamp.wav')!, 48000);
+});
+
 test('merge complete ACB fragments before comparing final WAV tracks', async () => {
     const old = audioArchive([{ name: 'same', data: silenceHca() }, { name: 'changed', data: silenceHca(22050) }]);
     const current = audioArchive([{ name: 'same', data: silenceHca() }, { name: 'changed', data: silenceHca(48000) }]);

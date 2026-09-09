@@ -23,6 +23,7 @@ import {
   rmSync,
 } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Canvas } from "skia-canvas";
 import {
   computeCellLayout,
@@ -161,10 +162,8 @@ function drawBackground(
   ctx.restore();
 }
 
-async function main(): Promise<void> {
+async function resolvePreviewDirectory(): Promise<string | null> {
   const arg = process.argv[2];
-
-  // 解析候选 preview 目录：指定参数则只用该目录；否则从新到旧找第一个有卡片的
   const candidates: string[] = [];
   if (arg) {
     const name = arg.endsWith("-preview") ? arg : `${arg}-preview`;
@@ -175,8 +174,6 @@ async function main(): Promise<void> {
     candidates.push(...listPreviewDirs());
   }
 
-  let dir: string | null = null;
-  let info: { dataVersion?: string; cards?: CardInfo[] } | null = null;
   for (const cand of candidates) {
     const infoPath = join(cand, "info.json");
     if (!existsSync(infoPath)) continue;
@@ -188,13 +185,25 @@ async function main(): Promise<void> {
       console.log(`[提示] ${cand} 的 info.json 中没有卡片，跳过`);
       continue;
     }
-    dir = cand;
-    info = parsed;
-    break;
+    return cand;
   }
-  if (!dir || !info) {
+  return null;
+}
+
+/**
+ * 从已解包目录直接渲染总览图。常驻服务调用本函数，不会执行 quick 解包或再次下载 bundle。
+ * @returns 生成的 overview.png 路径；没有可渲染卡片时返回 null。
+ */
+export async function renderOverviewDirectory(dir: string): Promise<string | null> {
+  const infoPath = join(dir, "info.json");
+  if (!existsSync(infoPath)) throw new Error(`未找到 ${infoPath}`);
+  const info = JSON.parse(readFileSync(infoPath, "utf8")) as {
+    dataVersion?: string;
+    cards?: CardInfo[];
+  };
+  if ((info.cards ?? []).length === 0) {
     console.log("没有找到包含卡片的 preview 目录，退出。");
-    return;
+    return null;
   }
   console.log(`→ 使用 preview 目录: ${dir}`);
 
@@ -227,7 +236,7 @@ async function main(): Promise<void> {
   }
   if (entries.length === 0) {
     console.log("没有任何可渲染的卡，退出。");
-    return;
+    return null;
   }
 
   // 三围条基准：取全卡最大值，保证跨卡可比较
@@ -311,9 +320,21 @@ async function main(): Promise<void> {
   console.log(
     `\n完成：总图 ${canvasW}×${totalH}px（2 列 × ${rows} 行，每格 ${S.CELL_W}×${cellH}），渲染 ${ok}/${n} 张卡 → ${outPath}`,
   );
+  return outPath;
 }
 
-main().catch((err) => {
-  console.error(`[view] ${(err as Error).message}`);
-  process.exit(1);
-});
+async function main(): Promise<void> {
+  const dir = await resolvePreviewDirectory();
+  if (!dir) {
+    console.log("没有找到包含卡片的 preview 目录，退出。");
+    return;
+  }
+  await renderOverviewDirectory(dir);
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error(`[view] ${(err as Error).message}`);
+    process.exit(1);
+  });
+}

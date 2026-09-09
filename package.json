@@ -16,6 +16,9 @@
     "grp": "npx tsx ./src/index.ts",
     "quick": "npx tsx ./src/quickUnpack.ts",
     "quick-master": "npx tsx ./src/quickMaster.ts",
+    "server": "concurrently --kill-others-on-fail --names notify,unpack --prefix-colors cyan,magenta \"yarn server:notify\" \"yarn server:unpack\"",
+    "server:notify": "npx tsx ./src/unpackServer.ts",
+    "server:unpack": "npx tsx ./src/unpackWorker.ts",
     "upsnap": "npx tsx ./src/updateSnapshots.ts",
     "gen:proto": "pbjs -t static-module -w es6 -o proto/gen/CE.js proto/CE.proto && pbts -o proto/gen/CE.d.ts proto/gen/CE.js",
     "test": "node --import tsx --test tests/*.test.ts",
@@ -46,6 +49,7 @@
     "typescript": "^5.9.3"
   },
   "devDependencies": {
+    "concurrently": "^10.0.5",
     "protobufjs-cli": "^2.6.1",
     "tsx": "^4.23.13"
   },

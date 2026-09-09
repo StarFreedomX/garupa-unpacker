@@ -14,8 +14,16 @@ export interface UnpackTimings {
     fileCount: number;
     outputBytes: number;
 }
+export interface BestEffortUnpackResult {
+    files: MemoryFiles;
+    /** true 表示全类型一次导出失败，已按类型降级并尽量保留结果。 */
+    degraded: boolean;
+    errors: string[];
+}
 export const DEFAULT_HCA_KEY = 0x22CE;
-const SEGMENT_PATTERN = /^(.*)-(\d{3,})\.(acb|awb)$/i;
+const SEGMENT_PATTERN = /^(.*)-(\d{3,})\.(acb|awb)(\.bytes)?$/i;
+const ACB_PATTERN = /^(.*)\.acb(\.bytes)?$/i;
+const HCA_PATTERN = /\.hca(\.bytes)?$/i;
 
 /** Both Unity container names and ACB cue names are untrusted relative paths. */
 export function assetPath(name: string): string {
@@ -41,7 +49,7 @@ export function mergeAudioSegments(input: MemoryFiles): MemoryFiles {
     for (const [name, data] of input) {
         const match = assetPath(name).match(SEGMENT_PATTERN);
         if (!match) { addFile(files, name, data); continue; }
-        const target = `${match[1]}.${match[3].toLowerCase()}`;
+        const target = `${match[1]}.${match[3].toLowerCase()}${match[4]?.toLowerCase() ?? ''}`;
         const parts = groups.get(target) ?? [];
         parts.push({ index: Number(match[2]), data });
         groups.set(target, parts);
@@ -96,16 +104,20 @@ export async function finalizeAssets(input: MemoryFiles): Promise<MemoryFiles> {
     const result: MemoryFiles = new Map();
     const companions = new Set<string>();
     for (const [name, data] of files) {
-        if (!/\.acb$/i.test(name)) continue;
-        const prefix = name.replace(/\.acb$/i, '');
-        const awbName = [...files.keys()].find(p => p.toLowerCase() === `${prefix}.awb`.toLowerCase());
+        const acbMatch = name.match(ACB_PATTERN);
+        if (!acbMatch) continue;
+        const prefix = acbMatch[1];
+        const byteSuffix = acbMatch[2] ?? '';
+        const awbCandidates = [`${prefix}.awb${byteSuffix}`, `${prefix}.awb`, `${prefix}.awb.bytes`]
+            .map(candidate => candidate.toLowerCase());
+        const awbName = [...files.keys()].find(p => awbCandidates.includes(p.toLowerCase()));
         const decoded = await decodeAcbBuffer(data, awbName ? files.get(awbName) : undefined);
         for (const [cue, buffer] of decoded) addFile(result, `${prefix}/${cue}`, buffer);
         if (awbName) companions.add(awbName);
     }
     for (const [name, data] of files) {
-        if (/\.acb$/i.test(name) || companions.has(name)) continue;
-        if (/\.hca$/i.test(name)) addFile(result, name.replace(/\.hca$/i, '.wav'), await decodeHcaBuffer(data));
+        if (ACB_PATTERN.test(name) || companions.has(name)) continue;
+        if (HCA_PATTERN.test(name)) addFile(result, name.replace(HCA_PATTERN, '.wav'), await decodeHcaBuffer(data));
         else addFile(result, name, data);
     }
     return result;
@@ -169,6 +181,62 @@ export async function unpackBundle(input: AssetInput, config: ExportAssetsDefaul
         timings.outputBytes = [...finalized.values()].reduce((size, data) => size + data.length, 0);
     }
     return finalized;
+}
+
+function mergeBestEffort(target: MemoryFiles, source: MemoryFiles): void {
+    for (const [name, data] of source) {
+        const previous = target.get(name);
+        if (!previous) target.set(name, data);
+        else if (!previous.equals(data)) throw new Error(`降级导出资源重名: ${name}`);
+    }
+}
+
+/**
+ * 常驻全解专用：先尝试正常的全类型导出；若某个类型（常见为 Animator 的重复 Transform）
+ * 拖垮整个 bundle，则拆类型导出。转换仍失败的类型再尝试 exportRaw，保证图片等可用资源
+ * 不会因为无关对象失败而全部丢失。
+ */
+export async function unpackBundleBestEffort(input: AssetInput): Promise<BestEffortUnpackResult> {
+    try {
+        return { files: await unpackBundle(input), degraded: false, errors: [] };
+    } catch (error) {
+        const errors = [`all: ${error instanceof Error ? error.message : error}`];
+        const files: MemoryFiles = new Map();
+        const safeTypes = AssetTypes.filter(type => type !== 'all' && type !== 'animator');
+        try {
+            // Animator 最依赖 Transform 层级，先把其余类型合批导出，避免每种类型重复解析 bundle。
+            mergeBestEffort(files, await unpackBundle(input, { assetType: safeTypes }));
+        } catch (batchError) {
+            errors.push(`without-animator: ${batchError instanceof Error ? batchError.message : batchError}`);
+            for (const type of safeTypes) {
+                try {
+                    mergeBestEffort(files, await unpackBundle(input, { assetType: type, group: 'type' }));
+                } catch (typedError) {
+                    errors.push(`${type}: ${typedError instanceof Error ? typedError.message : typedError}`);
+                    try {
+                        mergeBestEffort(files, await unpackBundle(input, {
+                            assetType: type,
+                            mode: 'exportRaw',
+                            group: 'type',
+                        }));
+                    } catch (rawError) {
+                        errors.push(`${type}/raw: ${rawError instanceof Error ? rawError.message : rawError}`);
+                    }
+                }
+            }
+        }
+        // Animator 的普通导出已随全类型导出失败；直接保留原始对象。
+        try {
+            mergeBestEffort(files, await unpackBundle(input, {
+                assetType: 'animator', mode: 'exportRaw', group: 'type',
+            }));
+        } catch (rawError) {
+            errors.push(`animator/raw: ${rawError instanceof Error ? rawError.message : rawError}`);
+        }
+        /* istanbul ignore next -- defensive: normal and every fallback type all failed */
+        if (files.size === 0) throw error;
+        return { files, degraded: true, errors };
+    }
 }
 
 export function changedFiles(current: MemoryFiles, previous: MemoryFiles): MemoryFiles {

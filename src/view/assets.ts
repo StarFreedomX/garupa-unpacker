@@ -6,7 +6,8 @@
  *     2-6星按稀有度: /res/image/card-<rarity>.png
  * - 属性图标：Bestdori CDN SVG → svg2img 转 PNG
  *     /res/icon/<attribute>.svg
- * - 星星：本地 assets/view/star.png / star_trained.png
+ * - 星星：Bestdori CDN PNG
+ *     /res/icon/star.png / star_trained.png
  *
  * 所有远端素材落盘缓存到 assets/view/cache/，二次运行命中缓存直接读取。
  * 网络失败降级：卡框 → 不叠加（返回 null，调用方跳过）；图标 → 属性色圆点（返回 null）。
@@ -45,6 +46,12 @@ function iconCacheName(attribute: string): string {
 
 function iconUrl(attribute: string): string {
   return `${CDN}icon/${attribute}.svg`;
+}
+
+type StarIconName = "star" | "star_trained";
+
+function starUrl(name: StarIconName): string {
+  return `${CDN}icon/${name}.png`;
 }
 
 function ensureCacheDir(): void {
@@ -127,12 +134,27 @@ export async function getAttributeIcon(attribute: string): Promise<Image | null>
   }
 }
 
+/** 获取普通或特训星星图标。下载失败时返回 null，由卡片渲染器跳过星级。 */
+export async function getStarIcon(name: StarIconName): Promise<Image | null> {
+  const fileName = `${name}.png`;
+  try {
+    return await cachedLoad(join(CACHE_DIR, fileName), `星星 ${fileName}`, () =>
+      fetchBytes(starUrl(name)),
+    );
+  } catch (err) {
+    console.warn(
+      `  [警告] 星星 ${fileName} 下载失败: ${(err as Error).message}，本次不叠加星级`,
+    );
+    return null;
+  }
+}
+
 export interface AssetCache {
   /** 卡框：key = frameCacheName()（card-5.png / card-1-happy.png），value 可能为 null（失败降级） */
   frames: Map<string, Image | null>;
   /** 属性图标：key = attribute */
   icons: Map<string, Image | null>;
-  /** 普通 / 特训 星星（本地素材；缺失时为 null） */
+  /** 普通 / 特训星星（Bestdori CDN 缓存；失败时为 null） */
   star: Image | null;
   starTrained: Image | null;
 }
@@ -175,17 +197,17 @@ export async function prefetchAssets(
       }),
     );
   }
-  await Promise.all(jobs);
-
-  // 本地星星素材
   let star: Image | null = null;
   let starTrained: Image | null = null;
-  try {
-    star = await loadImage(join("assets", "view", "star.png"));
-    starTrained = await loadImage(join("assets", "view", "star_trained.png"));
-  } catch (err) {
-    console.warn(`  [警告] 本地星星素材缺失: ${(err as Error).message}`);
-  }
+  jobs.push(
+    getStarIcon("star").then((img) => {
+      star = img;
+    }),
+    getStarIcon("star_trained").then((img) => {
+      starTrained = img;
+    }),
+  );
+  await Promise.all(jobs);
 
   return { frames, icons, star, starTrained };
 }
