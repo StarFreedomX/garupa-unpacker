@@ -34,7 +34,7 @@ cd garupa-unpacker
 # 安装
 yarn install
 
-# 首次运行或 proto/CE.proto 更新后生成协议代码
+# yarn install 会自动生成 proto/gen；仅在手动修改 proto/CE.proto 后需要再次运行
 yarn gen:proto
 ```
 
