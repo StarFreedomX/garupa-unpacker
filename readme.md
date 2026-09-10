@@ -57,6 +57,12 @@ yarn grp
 新增/变化 bundle；尚未部署的 bundle 会在之后的轮询中重试，不会挡住已经完成的 bundle。
 探测进程看到某个 bundle 的完成索引后立即发送其中的目标文件，不等待整次全解结束。
 
+未显式指定客户端版本时，`/application` 与 SuiteMaster 请求会从日本 App Store 查询游戏版本，
+成功结果缓存 5 分钟，常驻轮询会在缓存到期后重新查询，避免固定旧客户端版本而漏掉数据更新。
+查询失败时沿用本进程上次成功的版本，1 分钟后重试；尚无成功记录时使用
+`GARUPA_CLIENT_VERSION_DEFAULT`，再兜底为内置版本。`GARUPA_CLIENT_VERSION_FORCE` 可跳过
+自动查询并强制版本；显式传入版本的历史查询仍使用指定版本。
+
 ```shell
 cp .env.example .env
 # 至少填写 GARUPA_AES_KEY / GARUPA_AES_IV / ONEBOT_API_BASE_URL / ONEBOT_GROUP_IDS

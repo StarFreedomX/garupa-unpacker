@@ -119,7 +119,7 @@ class UnpackMonitor {
         this.appPolling = true;
         this.lastApplicationCheck = new Date().toISOString();
         try {
-            const app = await fetchApplication(this.state.application?.clientVersion);
+            const app = await fetchApplication();
             const next: ApplicationState = {
                 clientVersion: app.clientVersion,
                 dataVersion: app.dataVersion,
