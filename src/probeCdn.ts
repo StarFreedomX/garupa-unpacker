@@ -29,7 +29,7 @@ export async function probeCdnVersion(version: string): Promise<boolean> {
 
     const store = await loadStore(STORE_FILE);
     const hash = process.env.UNPACK_SERVER_CDN_HASH?.trim()
-        || findHashForDataVersion(store, version, store.latest.clientVersion);
+        || findHashForDataVersion(store, version);
     if (!hash) {
         throw new Error(`找不到 ${version} 对应的 CDN hash，可在 .env 配置 UNPACK_SERVER_CDN_HASH`);
     }

@@ -35,7 +35,7 @@ import {
 import {
     pickTargetFiles, resourceSetsFromDiff, selectBundleTargets, type BundleTarget,
 } from "./unpackServer/targets.js";
-import { incrementVersion } from "./unpackServer/version.js";
+import { predictedVersion } from "./unpackServer/version.js";
 import { indexFilesToMemory, readBundleIndex } from "./unpackServer/unpackedIndex.js";
 
 dotenv.config();
@@ -150,7 +150,7 @@ class UnpackMonitor {
 
     private hashFor(version: string): string | null {
         return this.config.cdnHash
-            || findHashForDataVersion(this.store, version, this.state.application?.clientVersion);
+            || findHashForDataVersion(this.store, version);
     }
 
     private manifestFile(version: string): string {
@@ -351,7 +351,7 @@ class UnpackMonitor {
     private async processCycle(cycle: CycleState): Promise<void> {
         // 猜错后不再继续错误候选；已经由 application 确认的周期不受影响。
         const observed = this.state.application?.dataVersion;
-        if (!cycle.confirmed && (!observed || incrementVersion(observed) !== cycle.targetVersion)) return;
+        if (!cycle.confirmed && (!observed || predictedVersion(observed, Object.keys(this.store.hashes)) !== cycle.targetVersion)) return;
         try {
             const targetManifest = await this.fetchManifest(cycle.targetVersion, cycle.manifestReady);
             const baseManifest = await this.fetchManifest(cycle.baseVersion, true);
@@ -384,7 +384,7 @@ class UnpackMonitor {
         try {
             const app = this.state.application;
             if (!app) return;
-            const predicted = incrementVersion(app.dataVersion);
+            const predicted = predictedVersion(app.dataVersion, Object.keys(this.store.hashes));
             ensureCycle(this.state, app.dataVersion, predicted, false);
             const cycles = Object.values(this.state.cycles).filter(cycle =>
                 cycle.confirmed || (cycle.baseVersion === app.dataVersion && cycle.targetVersion === predicted),
@@ -399,7 +399,7 @@ class UnpackMonitor {
         return {
             ok: !this.lastGlobalError,
             application: this.state.application,
-            predictedVersion: this.state.application ? incrementVersion(this.state.application.dataVersion) : null,
+            predictedVersion: this.state.application ? predictedVersion(this.state.application.dataVersion, Object.keys(this.store.hashes)) : null,
             lastApplicationCheck: this.lastApplicationCheck,
             lastCdnCheck: this.lastCdnCheck,
             error: this.lastGlobalError,

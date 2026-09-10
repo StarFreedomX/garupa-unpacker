@@ -12,7 +12,7 @@ import type { UnpackServerConfig } from "../src/unpackServer/config.js";
 import { emptyServerState, ensureCycle, loadServerState, saveServerState } from "../src/unpackServer/state.js";
 import { pickTargetFiles, resourceSetsFromDiff, selectBundleTargets } from "../src/unpackServer/targets.js";
 import { indexFilesToMemory, type UnpackedBundleIndex } from "../src/unpackServer/unpackedIndex.js";
-import { incrementVersion } from "../src/unpackServer/version.js";
+import { incrementVersion, predictedVersion } from "../src/unpackServer/version.js";
 
 async function temporary(t: TestContext): Promise<string> {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "garupa-server-"));
@@ -218,4 +218,23 @@ test("bundle index only marks new files and additions-only targets reject modifi
     };
     assert.deepEqual([...await indexFilesToMemory(index, false).then(result => result.keys())], ["added.png", "modified.png"]);
     assert.deepEqual([...await indexFilesToMemory(index, true).then(result => result.keys())], ["added.png"]);
+});
+
+test("prediction uses the newest known CDN line, then normal increments", () => {
+    const lines = ["10.0.0", "10.2.0", "10.1.0"];
+    assert.equal(predictedVersion("10.1.0.290", lines), "10.2.0.100");
+    assert.equal(predictedVersion("10.2.0.100", lines), "10.2.0.110");
+    assert.equal(predictedVersion("10.3.0.221", lines), "10.3.0.230");
+    assert.equal(predictedVersion("10.1.0.290"), "10.1.0.310");
+    assert.equal(predictedVersion("9.9.0.221", ["9.9.0", "10.2.0"]), "10.2.0.100");
+});
+
+test("prediction rounds patch revisions and skips whole hundreds", () => {
+    for (const [version, expected] of [
+        ["10.1.0.220", "10.1.0.230"],
+        ["10.1.0.221", "10.1.0.230"],
+        ["10.1.0.190", "10.1.0.210"],
+        ["10.1.0.191", "10.1.0.210"],
+        ["10.1.0.299", "10.1.0.310"],
+    ]) assert.equal(predictedVersion(version), expected);
 });

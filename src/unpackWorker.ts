@@ -17,7 +17,7 @@ import { loadServerState, type CycleState } from "./unpackServer/state.js";
 import {
     bundleIndexFile, bundleOutputDirectory, readBundleIndex, type UnpackedBundleIndex,
 } from "./unpackServer/unpackedIndex.js";
-import { incrementVersion } from "./unpackServer/version.js";
+import { predictedVersion } from "./unpackServer/version.js";
 
 dotenv.config();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -51,7 +51,7 @@ class FullUnpackWorker {
 
     private async baseUrl(version: string): Promise<string> {
         const store = await loadStore(STORE_FILE);
-        const hash = this.config.cdnHash || findHashForDataVersion(store, version, store.latest.clientVersion);
+        const hash = this.config.cdnHash || findHashForDataVersion(store, version);
         if (!hash) throw new Error(`没有 ${version} 对应的 CDN hash`);
         return buildAssetBundleUrl(version, hash).replace(/AssetBundleInfo$/, "");
     }
@@ -104,10 +104,11 @@ class FullUnpackWorker {
 
     async poll(): Promise<void> {
         const state = await loadServerState(this.config.stateFile);
+        const store = await loadStore(STORE_FILE);
         const cycles = Object.values(state.cycles).filter(cycle => cycle.manifestReady && (
             cycle.confirmed || (state.application
                 && cycle.baseVersion === state.application.dataVersion
-                && cycle.targetVersion === incrementVersion(state.application.dataVersion))
+                && cycle.targetVersion === predictedVersion(state.application.dataVersion, Object.keys(store.hashes)))
         ));
         for (const cycle of cycles) {
             try {

@@ -51,8 +51,8 @@ yarn grp
 探测进程不会自己解包，
 两个进程通过持久状态和逐 bundle 完成索引衔接。
 
-`yarn server:notify` 会同时轮询游戏 `/application` 与 CDN 上的猜测版本。猜测规则为版本末段通常
-`+10`，尾数为 `90` 时 `+20`。目标 `AssetBundleInfo` 提前出现后，服务只用清单差异定位下列
+`yarn server:notify` 会同时轮询游戏 `/application` 与 CDN 上的猜测版本。同一版本线的猜测规则为：
+末段先向下对齐十位再 `+10`，遇到整百则再 `+10`（如 `.220` / `.221` → `.230`，`.190` / `.191` → `.210`）。目标 `AssetBundleInfo` 提前出现后，服务只用清单差异定位下列
 目标资源所在的 bundle（不会发送清单里的其他差异）。`yarn server:unpack` 随即并发处理全部
 新增/变化 bundle；尚未部署的 bundle 会在之后的轮询中重试，不会挡住已经完成的 bundle。
 探测进程看到某个 bundle 的完成索引后立即发送其中的目标文件，不等待整次全解结束。
@@ -185,3 +185,6 @@ ASSET_STUDIO_TEST_INPUT=/path/to/res014089 yarn test
 ## 致谢
 
 本项目由Gemini、ChatGPT、Grok、DeepSeek协作完成
+
+
+若 `AssetBundleInfoUrl.json` 的 `hashes` 中有比当前数据版本更新的版本线（例如 `10.2.0`），server 优先探测最新版本线的 `.100`（`10.2.0.100`）。游戏接口进入该版本线后恢复上述递增规则；修改 hash 配置后需重启 server。
