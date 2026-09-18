@@ -700,6 +700,7 @@ message InAppCacheProtoData {
    bool isNfoFirstTransitioned = 195;
    int32 selecteNfoLevelId = 196;
    int32 selectNfoCharacterId = 197;
+   int32 stampFavoritelistLastPage = 198;
 }
 enum InGameGraphicsMode {
    InGameGraphicsMode_Normal = 0;
@@ -2756,6 +2757,24 @@ message MasterFourFrameCartoonCharacterMap {
 message MasterFourFrameCartoonMap {
    map<uint32,MasterFourFrameCartoon> entries = 1;
 }
+message MasterFriendLiveClearGift {
+   uint32 giftRarity = 1;
+   float rate = 2;
+}
+message MasterFriendLiveClearGiftItem {
+   uint32 giftRarity = 1;
+   uint32 seq = 2;
+   string resourceType = 3;
+   uint32 resourceId = 4;
+   uint32 quantity = 5;
+   uint32 weight = 6;
+}
+message MasterFriendLiveClearGiftItemList {
+   repeated MasterFriendLiveClearGiftItem entries = 1;
+}
+message MasterFriendLiveClearGiftList {
+   repeated MasterFriendLiveClearGift entries = 1;
+}
 message MasterGacha {
    uint32 gachaId = 1;
    string gachaName = 2;
@@ -4299,6 +4318,17 @@ message MasterNewYearCard {
 }
 message MasterNewYearCardMap {
    map<uint32,MasterNewYearCard> entries = 1;
+}
+message MasterNewYearDetail {
+   uint32 newYearDetailId = 1;
+   uint64 publishedAt = 2;
+   uint64 closedAt = 3;
+   uint32 genericStoryId = 4;
+   uint32 genericAnimationId = 5;
+   string urlYear = 6;
+}
+message MasterNewYearDetailMap {
+   map<uint32,MasterNewYearDetail> entries = 1;
 }
 message MasterPanelMission {
    string type = 1;
@@ -6082,6 +6112,9 @@ message SuiteMasterGetResponse {
    MasterComebackInviteMissionListMaps masterComebackInviteMissionListMaps = 2090;
    MasterComebackInviteList masterComebackInviteList = 2091;
    MasterBiliNfoMissionList masterBiliNfoMissionList = 2092;
+   MasterFriendLiveClearGiftList masterFriendLiveClearGiftList = 2093;
+   MasterFriendLiveClearGiftItemList masterFriendLiveClearGiftItemList = 2094;
+   MasterNewYearDetailMap MasterNewYearDetailMap = 2095;
 }
 message SuiteMultiLiveCountRewardResponse {
    SuiteUserGetResponse updateResources = 1;
@@ -6190,6 +6223,21 @@ message SuiteUserExchanges {
 message SuiteUserFestivalTeamResponse {
    SuiteUserGetResponse updateResources = 1;
    UserFestivalEventTeamResponse userFestivalEventTeamResponse = 2;
+}
+message SuiteUserFriendLiveClearGift {
+   UserFriendLiveClearGift userFriendLiveClearGift = 1;
+   string userName = 2;
+   string introduction = 3;
+   UserSituation leaderSituation = 4;
+   UserProfileSituation userProfileSituation = 5;
+}
+message SuiteUserFriendLiveClearGiftListResponse {
+   repeated SuiteUserFriendLiveClearGift userFriendLiveClearGiftList = 1;
+}
+message SuiteUserFriendLiveClearGiftReceiveResponse {
+   SuiteUserGetResponse updateResources = 1;
+   uint32 maxRarity = 2;
+   MasterFriendLiveClearGiftItemList receivedGiftItemList = 3;
 }
 message SuiteUserFriendRelationResponse {
    SuiteUserGetResponse updateResources = 1;
@@ -6383,6 +6431,7 @@ message SuiteUserGetResponse {
    UserComebackInviteMissionListMap userComebackInviteMissionListMap = 463;
    UserComebackInviteMissionCountMap userComebackInviteMissionCountMap = 464;
    UserComebackInviteMissionClearInformationList userComebackInviteMissionClearInformationList = 465;
+   uint64 unReceivedFriendGiftCount = 468;
    UserMusicClearCountDetailMap userMusicClearCountDetailMap = 480;
 }
 message SuiteUserInherit {
@@ -6453,6 +6502,8 @@ message SuiteUserMedleyInterimResponse {
    UserMedleyMusicScoreMap scoreMap = 6;
    string dailyLiveRewardReceive = 7;
    UserMusicAchievementMap userMusicAchievementMap = 8;
+   bool grantFriendGiftFlg = 9;
+   uint32 remainFriendGiftCount = 10;
 }
 message SuiteUserMedleyMusic {
    SuiteUserGetResponse updateResources = 1;
@@ -6471,6 +6522,8 @@ message SuiteUserMedleyMusic {
    uint32 userAfterLiveTalkDeckId = 14;
    UserMedleyMusicScoreMap scoreMap = 15;
    uint32 livePoint = 16;
+   bool grantFriendGiftFlg = 17;
+   uint32 remainFriendGiftCount = 18;
 }
 message SuiteUserMiracleTicketExchangeResponse {
    SuiteUserGetResponse updateResources = 1;
@@ -6509,6 +6562,8 @@ message SuiteUserMultiRoom {
    uint32 livePoint = 25;
    UserCharacterRankMap userCharacterRankMap = 26;
    UserCharacterRankRewardListMap grantCharacterRankRewardListMap = 27;
+   bool grantFriendGiftFlg = 28;
+   uint32 remainFriendGiftCount = 29;
 }
 message SuiteUserMultiTeamLiveFestivalMusicReserveLiveBoostRequest {
    string liveType = 1;
@@ -6562,6 +6617,8 @@ message SuiteUserMusic {
    UserCharacterRankRewardListMap grantCharacterRankRewardListMap = 23;
    UserVersusLiveClearResponse versusEventResponse = 24;
    UserFestivalLiveClearResponse festivalEventResponse = 25;
+   bool grantFriendGiftFlg = 26;
+   uint32 remainFriendGiftCount = 27;
 }
 message SuiteUserMusicPractice {
    SuiteUserGetResponse updateResources = 1;
@@ -6645,6 +6702,8 @@ message SuiteUserStageChallengeMusic {
    uint32 livePoint = 20;
    UserCharacterRankMap userCharacterRankMap = 21;
    UserCharacterRankRewardListMap grantCharacterRankRewardListMap = 22;
+   bool grantFriendGiftFlg = 23;
+   uint32 remainFriendGiftCount = 24;
 }
 message SuiteUserStarSealExchangeGachaSealResponse {
    SuiteUserGetResponse updateResources = 1;
@@ -6729,6 +6788,8 @@ message TutorialCacheProtoData {
    bool isRead3DMode = 40;
    bool isReadPhotoStudio = 41;
    uint32 isReadComebackInviteId = 42;
+   bool isReadFriendLiveClearGift = 43;
+   bool isReadFriendTutorialInFriendLiveClearGift = 44;
 }
 message TutorialCompleteData {
    bool IsDone = 1;
@@ -7093,6 +7154,8 @@ message UserChallengeMusicResponse {
    UserCharacterRankMap userCharacterRankMap = 19;
    uint32 livePoint = 21;
    UserCharacterRankRewardListMap grantCharacterRankRewardListMap = 22;
+   bool grantFriendGiftFlg = 23;
+   uint32 remainFriendGiftCount = 24;
 }
 message UserCharacter {
    uint64 userCharacterId = 1;
@@ -7830,6 +7893,8 @@ message UserFestivalLiveResponse {
    uint32 livePoint = 31;
    UserCharacterRankMap userCharacterRankMap = 32;
    UserCharacterRankRewardListMap grantCharacterRankRewardListMap = 33;
+   bool grantFriendGiftFlg = 34;
+   uint32 remainFriendGiftCount = 35;
 }
 message UserFestivalTeam {
    uint32 eventId = 1;
@@ -7860,6 +7925,19 @@ message UserFriendDetail {
    uint32 applicationLimit = 4;
    uint32 approvalLimit = 5;
    uint32 friendLimit = 6;
+}
+message UserFriendLiveClearGift {
+   uint64 giftId = 1;
+   uint64 userId = 2;
+   uint64 giftUserId = 3;
+   uint64 expiredAt = 4;
+   bool receivedFlg = 5;
+   uint32 receivedGiftRarity = 6;
+   uint32 receivedGiftItemSeq = 7;
+   uint64 receivedAt = 8;
+}
+message UserFriendLiveClearGiftList {
+   repeated UserFriendLiveClearGift entries = 1;
 }
 message UserFriendMap {
    map<uint64,UserFriend> entries = 1;
@@ -8773,6 +8851,8 @@ message UserMultiVersusLiveMusicResponse {
    uint32 livePoint = 24;
    UserCharacterRankMap userCharacterRankMap = 25;
    UserCharacterRankRewardListMap grantCharacterRankRewardListMap = 26;
+   bool grantFriendGiftFlg = 27;
+   uint32 remainFriendGiftCount = 28;
 }
 message UserMusicAchievement {
    uint64 userId = 1;
