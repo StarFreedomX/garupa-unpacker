@@ -114,12 +114,10 @@ export class OneBotNotifier {
         if (isImage(notice.file)) {
             const bytes = await fs.readFile(notice.file);
             await this.sendGroupMessage(groupId, [
-                { type: "text", data: { text: `${title}\n` } },
                 { type: "image", data: { file: `base64://${bytes.toString("base64")}`, mime: mimeType(notice.file) } },
             ]);
             return;
         }
-        await this.sendGroupMessage(groupId, title);
         await this.uploadGroupFile(groupId, notice.file);
     }
 
@@ -140,9 +138,7 @@ export class OneBotNotifier {
             notice,
             bytes: await fs.readFile(notice.file),
         })));
-        const text = `${title}（${notices.length}张）\n`;
         await this.sendGroupMessage(groupId, [
-            { type: "text", data: { text } },
             ...images.map(({ notice, bytes }) => ({
                 type: "image",
                 data: { file: `base64://${bytes.toString("base64")}`, mime: mimeType(notice.file) },

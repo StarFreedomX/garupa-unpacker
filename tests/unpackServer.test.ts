@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { compareAssetMaps, parseAssetBundleInfo } from "../src/compare.js";
-import { buildPreviewInfo } from "../src/unpackServer/master.js";
+import { buildPreviewInfo, formatMusicNotices } from "../src/unpackServer/master.js";
 import { OneBotNotifier } from "../src/unpackServer/onebot.js";
 import type { UnpackServerConfig } from "../src/unpackServer/config.js";
 import { emptyServerState, ensureCycle, loadServerState, saveServerState } from "../src/unpackServer/state.js";
@@ -124,18 +124,13 @@ test("OneBot can merge images from one bundle into one message", async t => {
     assert.equal(body.group_id, "123");
     assert.equal(body.message.filter(segment => segment.type === "image").length, 2);
     const texts = body.message.filter(segment => segment.type === "text");
-    assert.equal(texts.length, 1);
-    assert.equal(texts[0].data?.text, "【Garupa 1.0.0.20】活动介绍图（2张）\n");
-    assert.doesNotMatch(texts[0].data?.text ?? "", /rule\d|event\/test|first\.png|second\.png/);
+    assert.equal(texts.length, 0);
     await new OneBotNotifier(config).sendResource("123", {
         kind: "voice-stamp", version: "1.0.0.20", bundle: "sound/voice_stamp",
         name: "voice-stamp/voice.wav", file: voice,
     });
-    assert.equal(received.length, 3);
-    const voiceMessage = received[1] as { message: string };
-    assert.equal(voiceMessage.message, "【Garupa 1.0.0.20】新增语音表情");
-    assert.doesNotMatch(voiceMessage.message, /voice\.wav|sound\/voice_stamp/);
-    const upload = received[2] as { file: string; name: string };
+    assert.equal(received.length, 2);
+    const upload = received[1] as { file: string; name: string };
     assert.equal(upload.name, "voice.wav");
     assert.match(upload.file, /^base64:\/\//);
 });
@@ -192,6 +187,15 @@ test("SuiteMaster metadata is limited to diff cards and genuinely new music IDs"
     assert.deepEqual(info.cards[0].parameters, { performance: 100, technique: 200, visual: 300 });
     assert.equal(info.cards[0].skill.description, "score 100%");
     assert.deepEqual(info.musics.map(music => music.title), ["New Song"]);
+});
+
+test("SuiteMaster music notices are formatted as one aggregated message", () => {
+    const notice = formatMusicNotices("1.0.0.20", [
+        { title: "Song A", bandName: "Band A", levels: [{ difficulty: "expert", playLevel: 25 }] },
+        { title: "Song B", bandName: "Band B", levels: [{ difficulty: "expert", playLevel: 27 }] },
+    ]);
+    assert.equal(notice.match(/【Garupa/g)?.length, 1);
+    assert.match(notice, /Song A \/ Band A[\s\S]*Song B \/ Band B/);
 });
 
 test("server state survives restart and confirmed cycles upgrade speculative ones", async t => {

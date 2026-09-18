@@ -40,7 +40,7 @@ function fillSkillDescription(
     });
 }
 
-/** SuiteMaster 更新后生成三围技能图和新曲通知共用的数据，不触发任何资源下载。 */
+/** SuiteMaster 更新后生成三围技能图和新曲元数据共用的数据，不触发任何资源下载。 */
 export function buildPreviewInfo(
     suite: Record<string, any>,
     version: string,
@@ -121,13 +121,19 @@ export function buildPreviewInfo(
     return { dataVersion: version, cards, musics };
 }
 
-export function formatMusicNotice(version: string, music: any): string {
+function formatMusicDetail(music: any): string {
     const levels = (music.levels ?? []).map((entry: any) => `${entry.difficulty}:${entry.playLevel}`).join(" / ");
     return [
-        `【Garupa ${version}】新曲`,
         `${music.title}${music.bandName ? ` / ${music.bandName}` : ""}`,
         levels || undefined,
         music.publishedAt ? `发布日期：${music.publishedAt}` : undefined,
         music.howToGet ? `获取方式：${music.howToGet}` : undefined,
     ].filter(Boolean).join("\n");
+}
+
+export function formatMusicNotices(version: string, musics: any[]): string {
+    return [
+        `【Garupa ${version}】新曲`,
+        ...musics.map(formatMusicDetail),
+    ].join("\n\n");
 }

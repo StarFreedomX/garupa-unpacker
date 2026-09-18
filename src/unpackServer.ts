@@ -4,7 +4,7 @@
  *
  * 同时轮询 /application 与推测版本 CDN；AssetBundleInfo 一旦出现便通知全解进程。
  * 本进程只消费逐 bundle 完成索引、筛选目标并通知。application 确认版本后，再读取
- * SuiteMaster 生成新曲消息及新卡三围技能总图，不在这里重复解包。
+ * SuiteMaster 生成新曲元数据及新卡三围技能总图，不在这里重复解包。
  */
 import dotenv from "dotenv";
 import axios from "axios";
@@ -26,7 +26,7 @@ import {
 import { networkGet } from "./network.js";
 import { renderOverviewDirectory } from "./view/index.js";
 import { loadUnpackServerConfig, type UnpackServerConfig } from "./unpackServer/config.js";
-import { buildPreviewInfo, formatMusicNotice, suiteMusicIds } from "./unpackServer/master.js";
+import { buildPreviewInfo, formatMusicNotices, suiteMusicIds } from "./unpackServer/master.js";
 import { isImage, OneBotNotifier, type ResourceNotice } from "./unpackServer/onebot.js";
 import {
     emptyServerState, ensureCycle, loadServerState, saveServerState,
@@ -265,16 +265,6 @@ class UnpackMonitor {
         }
     }
 
-    private async notifyTextOnce(cycle: CycleState, logicalKey: string, text: string): Promise<void> {
-        for (const group of this.notifier.destinations) {
-            const key = `${group}|${logicalKey}`;
-            if (cycle.textSent.includes(key)) continue;
-            await this.notifier.sendText(group, text);
-            cycle.textSent.push(key);
-            await this.persist();
-        }
-    }
-
     private async processMaster(cycle: CycleState, diff: AssetDiff): Promise<void> {
         if (!cycle.confirmed || cycle.masterReady
             || (!this.config.historicalReplay
@@ -299,8 +289,8 @@ class UnpackMonitor {
                 JSON.stringify(info, null, 2),
                 "utf-8",
             );
-            for (const music of info.musics) {
-                await this.notifyTextOnce(cycle, `music:${music.musicId}`, formatMusicNotice(cycle.targetVersion, music));
+            if (info.musics.length > 0) {
+                await this.notifyTextOnce(cycle, "music:all", formatMusicNotices(cycle.targetVersion, info.musics));
             }
             this.state.baselineMusicIds = suiteMusicIds(suite);
             cycle.masterReady = true;
@@ -310,6 +300,16 @@ class UnpackMonitor {
         } catch (error) {
             cycle.lastErrors.master = messageOf(error);
             console.warn(`[SuiteMaster:待重试] ${cycle.targetVersion}: ${messageOf(error)}`);
+            await this.persist();
+        }
+    }
+
+    private async notifyTextOnce(cycle: CycleState, logicalKey: string, text: string): Promise<void> {
+        for (const group of this.notifier.destinations) {
+            const key = `${group}|${logicalKey}`;
+            if (cycle.textSent.includes(key)) continue;
+            await this.notifier.sendText(group, text);
+            cycle.textSent.push(key);
             await this.persist();
         }
     }

@@ -88,8 +88,8 @@ SuiteMaster 时仍会按清单差异中的卡牌 resource set 和事先建立的
 服务处理并实时发送：新卡面、当期卡牌角色及颜色、新增表情和语音表情（聚合包按新旧最终文件
 比较，修改项不会发送）、活动介绍图、新曲完整 jacket/完整音频（缩略图、chorus 试听和原始谱面不发送）、`thumb/degree` 中新增且
 文件名为 `degree_event*` 的当期活动牌子。官方
-`application` 更新后，服务再访问 SuiteMaster，发送新曲文字信息并直接用已解包的缩略图
-生成 `view/overview.png` 三围技能图；这一阶段不会调用 quick/view CLI，也不会重复解包。
+`application` 更新后，服务再访问 SuiteMaster，将新曲文字信息合并成一条消息，并直接用已解包的缩略图生成
+`view/overview.png` 三围技能图；这一阶段不会调用 quick/view CLI，也不会重复解包。
 
 输出位于 `assets/server/<dataVersion>/`，发送去重和失败状态持久化在
 `out/unpack-server-state.json`。进程重启后只补失败项。健康接口提供当前 application 版本、
