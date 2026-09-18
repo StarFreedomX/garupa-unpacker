@@ -12,7 +12,7 @@ import type { UnpackServerConfig } from "../src/unpackServer/config.js";
 import { emptyServerState, ensureCycle, loadServerState, saveServerState } from "../src/unpackServer/state.js";
 import { pickTargetFiles, resourceSetsFromDiff, selectBundleTargets } from "../src/unpackServer/targets.js";
 import { indexFilesToMemory, type UnpackedBundleIndex } from "../src/unpackServer/unpackedIndex.js";
-import { incrementVersion, predictedVersion } from "../src/unpackServer/version.js";
+import { incrementVersion, parseTargetVersions, predictedVersion } from "../src/unpackServer/version.js";
 
 async function temporary(t: TestContext): Promise<string> {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "garupa-server-"));
@@ -231,6 +231,14 @@ test("prediction uses the newest known CDN line, then normal increments", () => 
     assert.equal(predictedVersion("10.3.0.221", lines), "10.3.0.230");
     assert.equal(predictedVersion("10.1.0.290"), "10.1.0.310");
     assert.equal(predictedVersion("9.9.0.221", ["9.9.0", "10.2.0"]), "10.2.0.100");
+});
+
+test("interactive CDN candidates accept one or multiple full versions", () => {
+    assert.deepEqual(parseTargetVersions("10.2.0.100, 10.2.0.110 10.2.0.100"), [
+        "10.2.0.100", "10.2.0.110",
+    ]);
+    assert.deepEqual(parseTargetVersions(""), []);
+    assert.throws(() => parseTargetVersions("10.2.0"), /四段/);
 });
 
 test("prediction rounds patch revisions and skips whole hundreds", () => {

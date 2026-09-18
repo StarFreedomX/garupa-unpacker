@@ -26,3 +26,13 @@ export function predictedVersion(observed: string, knownLines: string[] = []): s
         .sort(compareVersions)[0];
     return newest && compareVersions(newest, mainVersion(observed)) < 0 ? `${newest}.100` : next;
 }
+
+/** Parse interactive CDN candidates supplied as full four-part data versions. */
+export function parseTargetVersions(input: string): string[] {
+    const versions = input.split(/[\s,，]+/).map(value => value.trim()).filter(Boolean);
+    if (versions.length === 0) return [];
+    if (versions.some(version => !/^\d+\.\d+\.\d+\.\d+$/.test(version))) {
+        throw new Error("版本必须是四段 dataVersion，例如 10.2.0.100；多个版本用逗号或空格分隔");
+    }
+    return [...new Set(versions)];
+}

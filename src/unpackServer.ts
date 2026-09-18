@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import * as path from "node:path";
+import * as readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { compareAssetMaps, parseAssetBundleInfo, type AssetDiff } from "./compare.js";
 import { fetchApplication } from "./garupa/api/application.js";
@@ -35,7 +36,7 @@ import {
 import {
     pickTargetFiles, resourceSetsFromDiff, selectBundleTargets, type BundleTarget,
 } from "./unpackServer/targets.js";
-import { predictedVersion } from "./unpackServer/version.js";
+import { parseTargetVersions, predictedVersion } from "./unpackServer/version.js";
 import { indexFilesToMemory, readBundleIndex } from "./unpackServer/unpackedIndex.js";
 import { installShutdownHandlers } from "./shutdown.js";
 
@@ -79,8 +80,11 @@ class UnpackMonitor {
     private lastApplicationCheck?: string;
     private lastCdnCheck?: string;
     private lastGlobalError?: string;
+    private lastLoggedApplicationVersion?: string;
+    private lastLoggedPredictedVersion?: string;
+    private manualWinner?: string;
 
-    constructor(readonly config: UnpackServerConfig) {
+    constructor(readonly config: UnpackServerConfig, private readonly manualTargets: string[] = []) {
         this.notifier = new OneBotNotifier(config);
     }
 
@@ -130,9 +134,10 @@ class UnpackMonitor {
             if (previous && previous.dataVersion !== next.dataVersion) {
                 ensureCycle(this.state, previous.dataVersion, next.dataVersion, true);
                 console.log(`[application] 确认更新 ${previous.dataVersion} → ${next.dataVersion}`);
-            } else if (!previous) {
+            } else if (this.lastLoggedApplicationVersion !== next.dataVersion) {
                 console.log(`[application] 当前版本 ${next.dataVersion}`);
             }
+            this.lastLoggedApplicationVersion = next.dataVersion;
             this.state.application = next;
             this.store.latest = { ...next };
             recordSnapshot(this.store, next.clientVersion, {
@@ -352,9 +357,16 @@ class UnpackMonitor {
     private async processCycle(cycle: CycleState): Promise<void> {
         // 猜错后不再继续错误候选；已经由 application 确认的周期不受影响。
         const observed = this.state.application?.dataVersion;
-        if (!cycle.confirmed && (!observed || predictedVersion(observed, Object.keys(this.store.hashes)) !== cycle.targetVersion)) return;
+        const isManualCandidate = this.manualTargets.includes(cycle.targetVersion);
+        if (this.manualWinner && this.manualWinner !== cycle.targetVersion) return;
+        if (!cycle.confirmed && !isManualCandidate
+            && (!observed || predictedVersion(observed, Object.keys(this.store.hashes)) !== cycle.targetVersion)) return;
         try {
             const targetManifest = await this.fetchManifest(cycle.targetVersion, cycle.manifestReady);
+            if (isManualCandidate && !this.manualWinner) {
+                this.manualWinner = cycle.targetVersion;
+                console.log(`[CDN] 手动候选命中 ${cycle.targetVersion}，停止探测其他候选`);
+            }
             const baseManifest = await this.fetchManifest(cycle.baseVersion, true);
             if (!cycle.manifestReady) {
                 cycle.manifestReady = true;
@@ -386,9 +398,23 @@ class UnpackMonitor {
             const app = this.state.application;
             if (!app) return;
             const predicted = predictedVersion(app.dataVersion, Object.keys(this.store.hashes));
-            ensureCycle(this.state, app.dataVersion, predicted, false);
+            const candidates = this.manualWinner
+                ? [this.manualWinner]
+                : (this.manualTargets.length > 0 ? this.manualTargets : [predicted]);
+            if (this.manualTargets.length > 0) {
+                const candidateLog = candidates.join(", ");
+                if (this.lastLoggedPredictedVersion !== candidateLog) {
+                    console.log(`[CDN] 手动候选 ${candidateLog}（基准 application ${app.dataVersion}）`);
+                    this.lastLoggedPredictedVersion = candidateLog;
+                }
+            } else if (this.lastLoggedPredictedVersion !== predicted) {
+                console.log(`[CDN] 探测版本 ${predicted}（基准 application ${app.dataVersion}）`);
+                this.lastLoggedPredictedVersion = predicted;
+            }
+            for (const target of candidates) ensureCycle(this.state, app.dataVersion, target, false);
+            const candidateSet = new Set(candidates);
             const cycles = Object.values(this.state.cycles).filter(cycle =>
-                cycle.confirmed || (cycle.baseVersion === app.dataVersion && cycle.targetVersion === predicted),
+                cycle.confirmed || (candidateSet.has(cycle.targetVersion) && cycle.baseVersion === app.dataVersion),
             );
             for (const cycle of cycles) await this.processCycle(cycle);
         } finally {
@@ -400,7 +426,12 @@ class UnpackMonitor {
         return {
             ok: !this.lastGlobalError,
             application: this.state.application,
-            predictedVersion: this.state.application ? predictedVersion(this.state.application.dataVersion, Object.keys(this.store.hashes)) : null,
+            predictedVersion: this.state.application
+                ? (this.manualWinner ?? this.manualTargets[0]
+                    ?? predictedVersion(this.state.application.dataVersion, Object.keys(this.store.hashes)))
+                : null,
+            cdnCandidates: this.manualTargets.length > 0 ? this.manualTargets : undefined,
+            cdnSelectedVersion: this.manualWinner ?? null,
             lastApplicationCheck: this.lastApplicationCheck,
             lastCdnCheck: this.lastCdnCheck,
             error: this.lastGlobalError,
@@ -443,13 +474,37 @@ async function repeat(action: () => Promise<void>, interval: number, signal: Abo
     }
 }
 
+async function promptManualTargets(signal: AbortSignal): Promise<string[]> {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    try {
+        while (!signal.aborted) {
+            const input = await rl.question(
+                "请输入要探测的 CDN dataVersion（多个用逗号或空格分隔，直接回车自动推测）：\n> ",
+                { signal },
+            );
+            try {
+                return parseTargetVersions(input);
+            } catch (error) {
+                console.error(`[server] ${(error as Error).message}`);
+            }
+        }
+    } catch (error) {
+        if (!signal.aborted) throw error;
+    } finally {
+        rl.close();
+    }
+    return [];
+}
+
 export async function main(): Promise<void> {
     const config = loadUnpackServerConfig(PROJECT_ROOT);
-    const monitor = new UnpackMonitor(config);
-    await monitor.initialize();
-    const healthServer = startHealthServer(monitor);
     const controller = new AbortController();
     installShutdownHandlers(controller, "server");
+    const manualTargets = await promptManualTargets(controller.signal);
+    if (controller.signal.aborted) return;
+    const monitor = new UnpackMonitor(config, manualTargets);
+    await monitor.initialize();
+    const healthServer = startHealthServer(monitor);
     console.log(`[server] 实时预解包已启动${config.dryRun ? "（dry-run）" : ""}`);
     await Promise.all([
         repeat(() => monitor.pollApplication(), config.applicationPollMs, controller.signal),
