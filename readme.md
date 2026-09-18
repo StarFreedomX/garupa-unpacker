@@ -51,11 +51,19 @@ yarn grp
 探测进程不会自己解包，
 两个进程通过持久状态和逐 bundle 完成索引衔接。
 
-`yarn server:notify` 会同时轮询游戏 `/application` 与 CDN 上的猜测版本。猜测规则为版本末段通常
-`+10`，尾数为 `90` 时 `+20`。目标 `AssetBundleInfo` 提前出现后，服务只用清单差异定位下列
+`yarn server:notify` 会同时轮询游戏 `/application` 与 CDN 上的猜测版本。同一版本线的猜测规则为：
+末段先向下对齐十位再 `+10`，遇到整百则再 `+10`（如 `.220` / `.221` → `.230`，`.190` / `.191` → `.210`）。目标 `AssetBundleInfo` 提前出现后，服务只用清单差异定位下列
 目标资源所在的 bundle（不会发送清单里的其他差异）。`yarn server:unpack` 随即并发处理全部
 新增/变化 bundle；尚未部署的 bundle 会在之后的轮询中重试，不会挡住已经完成的 bundle。
 探测进程看到某个 bundle 的完成索引后立即发送其中的目标文件，不等待整次全解结束。
+
+启动 `yarn server` 时会交互询问 CDN dataVersion：直接回车使用程序自动推测；也可以输入一个或多个四段版本号（用逗号或空格分隔）作为候选。候选按输入顺序探测，命中一个 `AssetBundleInfo` 后立即选定该版本，不再探测其他候选。
+
+未显式指定客户端版本时，`/application` 与 SuiteMaster 请求会从日本 App Store 查询游戏版本，
+成功结果缓存 5 分钟，常驻轮询会在缓存到期后重新查询，避免固定旧客户端版本而漏掉数据更新。
+查询失败时沿用本进程上次成功的版本，1 分钟后重试；尚无成功记录时使用
+`GARUPA_CLIENT_VERSION_DEFAULT`，再兜底为内置版本。`GARUPA_CLIENT_VERSION_FORCE` 可跳过
+自动查询并强制版本；显式传入版本的历史查询仍使用指定版本。
 
 ```shell
 cp .env.example .env
@@ -82,12 +90,21 @@ SuiteMaster 时仍会按清单差异中的卡牌 resource set 和事先建立的
 服务处理并实时发送：新卡面、当期卡牌角色及颜色、新增表情和语音表情（聚合包按新旧最终文件
 比较，修改项不会发送）、活动介绍图、新曲完整 jacket/完整音频（缩略图、chorus 试听和原始谱面不发送）、`thumb/degree` 中新增且
 文件名为 `degree_event*` 的当期活动牌子。官方
-`application` 更新后，服务再访问 SuiteMaster，发送新曲文字信息并直接用已解包的缩略图
-生成 `view/overview.png` 三围技能图；这一阶段不会调用 quick/view CLI，也不会重复解包。
+`application` 更新后，服务再访问 SuiteMaster，将新曲文字信息合并成一条消息，并直接用已解包的缩略图生成
+`view/overview.png` 三围技能图；这一阶段不会调用 quick/view CLI，也不会重复解包。
 
 输出位于 `assets/server/<dataVersion>/`，发送去重和失败状态持久化在
 `out/unpack-server-state.json`。进程重启后只补失败项。健康接口提供当前 application 版本、
 猜测版本、各周期完成数与最近错误。
+
+需要手动快速确认某个版本是否已部署 CDN 清单时，只探测一次且不解包、不发送：
+
+```shell
+yarn probe:cdn 10.1.0.310
+```
+
+退出码 `0` 表示清单存在且可解析，`1` 表示 CDN 返回 403/404、尚未就绪，`2` 表示参数、hash
+或网络异常。该命令与常驻服务共用 `.env` 中的代理设置及 CDN hash 解析逻辑。
 
 ### 常见资源路径
 
@@ -170,3 +187,6 @@ ASSET_STUDIO_TEST_INPUT=/path/to/res014089 yarn test
 ## 致谢
 
 本项目由Gemini、ChatGPT、Grok、DeepSeek协作完成
+
+
+若 `AssetBundleInfoUrl.json` 的 `hashes` 中有比当前数据版本更新的版本线（例如 `10.2.0`），server 优先探测最新版本线的 `.100`（`10.2.0.100`）。游戏接口进入该版本线后恢复上述递增规则；修改 hash 配置后需重启 server。
