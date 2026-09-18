@@ -18,6 +18,7 @@ import {
     bundleIndexFile, bundleOutputDirectory, readBundleIndex, type UnpackedBundleIndex,
 } from "./unpackServer/unpackedIndex.js";
 import { predictedVersion } from "./unpackServer/version.js";
+import { installShutdownHandlers } from "./shutdown.js";
 
 dotenv.config();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -139,8 +140,7 @@ class FullUnpackWorker {
 
 export async function main(): Promise<void> {
     const controller = new AbortController();
-    process.once("SIGINT", () => controller.abort());
-    process.once("SIGTERM", () => controller.abort());
+    installShutdownHandlers(controller, "unpack-worker");
     await new FullUnpackWorker().run(controller.signal);
 }
 

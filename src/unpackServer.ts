@@ -37,6 +37,7 @@ import {
 } from "./unpackServer/targets.js";
 import { predictedVersion } from "./unpackServer/version.js";
 import { indexFilesToMemory, readBundleIndex } from "./unpackServer/unpackedIndex.js";
+import { installShutdownHandlers } from "./shutdown.js";
 
 dotenv.config();
 
@@ -448,9 +449,7 @@ export async function main(): Promise<void> {
     await monitor.initialize();
     const healthServer = startHealthServer(monitor);
     const controller = new AbortController();
-    const stop = () => controller.abort();
-    process.once("SIGINT", stop);
-    process.once("SIGTERM", stop);
+    installShutdownHandlers(controller, "server");
     console.log(`[server] 实时预解包已启动${config.dryRun ? "（dry-run）" : ""}`);
     await Promise.all([
         repeat(() => monitor.pollApplication(), config.applicationPollMs, controller.signal),
