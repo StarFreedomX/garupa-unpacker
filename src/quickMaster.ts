@@ -9,6 +9,7 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { getClientVersion } from "./garupa/version.js";
 import { fetchSuiteMaster } from "./garupa/api/suiteMaster.js";
+import { CARD_STAT_BASIS, fullCardParameters } from "./cardParameters.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -85,10 +86,7 @@ async function main() {
         .slice(0, TOP_CARDS)
         .map((sit: any) => {
             const charInfo = charInfos[String(sit.characterId)];
-            // 最高级三围：parameterMap 中 level 最大的一档
-            const paramEntries = sit.parameterMap ? Object.values(sit.parameterMap) : [];
-            const maxParam = paramEntries.reduce<any>((best, cur: any) =>
-                !best || (cur?.level ?? 0) > (best.level ?? 0) ? cur : best, null);
+            const { maxLevel, parameters } = fullCardParameters(sit);
             // 技能：situationSkillId → skillDef → skillList(lv1) → 占位符填充描述
             const skillDef = skillDefs[String(sit.situationSkillId)];
             const skillListRecord = skillList.find(
@@ -116,14 +114,8 @@ async function main() {
                 prefix: sit.prefix,
                 resourceSetName: sit.resourceSetName,
                 releasedAt: dateStr(sit.releasedAt),
-                maxLevel: maxParam?.level ?? null,
-                parameters: maxParam
-                    ? {
-                        performance: maxParam.performance,
-                        technique: maxParam.technique,
-                        visual: maxParam.visual,
-                    }
-                    : null,
+                maxLevel,
+                parameters,
                 skill,
             };
         });
@@ -160,6 +152,7 @@ async function main() {
     const payload = {
         fetchedAt: new Date().toISOString(),
         clientVersion,
+        statBasis: CARD_STAT_BASIS,
         cards,
         events: topEvents,
         songs,

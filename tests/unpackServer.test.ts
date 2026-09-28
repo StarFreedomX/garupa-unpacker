@@ -7,6 +7,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { compareAssetMaps, parseAssetBundleInfo } from "../src/compare.js";
 import { buildPreviewInfo, formatMusicNotices } from "../src/unpackServer/master.js";
+import { fullCardParameters } from "../src/cardParameters.js";
 import { OneBotNotifier } from "../src/unpackServer/onebot.js";
 import type { UnpackServerConfig } from "../src/unpackServer/config.js";
 import { emptyServerState, ensureCycle, loadServerState, saveServerState } from "../src/unpackServer/state.js";
@@ -195,6 +196,24 @@ test("SuiteMaster metadata is limited to diff cards and genuinely new music IDs"
     assert.deepEqual(info.cards[0].parameters, { performance: 100, technique: 200, visual: 300 });
     assert.equal(info.cards[0].skill.description, "score 100%");
     assert.deepEqual(info.musics.map(music => music.title), ["New Song"]);
+});
+
+test("card stats include training and unlocked episodes but no limit break", () => {
+    const result = fullCardParameters({
+        parameterMap: {
+            50: { level: 50, performance: 7898, technique: 7206, visual: 6213 },
+            60: { level: 60, performance: 11828, technique: 10790, visual: 9303 },
+        },
+        training: { trainingPerformance: 400, trainingTechnique: 400, trainingVisual: 400 },
+        episodes: { entries: [
+            { appendPerformance: 250, appendTechnique: 250, appendVisual: 250 },
+            { appendPerformance: 600, appendTechnique: 600, appendVisual: 600 },
+        ] },
+    });
+    assert.deepEqual(result, {
+        maxLevel: 60,
+        parameters: { performance: 13078, technique: 12040, visual: 10553 },
+    });
 });
 
 test("SuiteMaster music notices are formatted as one aggregated message", () => {

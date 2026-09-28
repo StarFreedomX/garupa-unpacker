@@ -1,5 +1,8 @@
+import { CARD_STAT_BASIS, fullCardParameters } from "../cardParameters.js";
+
 export interface PreviewInfo {
     dataVersion: string;
+    statBasis: string;
     cards: any[];
     musics: any[];
 }
@@ -67,10 +70,7 @@ export function buildPreviewInfo(
             const skillRecord = skillList.find(
                 entry => entry.skillId === skillDef?.skillId && entry.skillLevel === 1,
             );
-            const parameters = Object.values(situation.parameterMap ?? {}).reduce<any>(
-                (best, value: any) => !best || (value?.level ?? 0) > (best.level ?? 0) ? value : best,
-                null,
-            );
+            const { maxLevel, parameters } = fullCardParameters(situation);
             return {
                 situationId: situation.situationId,
                 characterId: situation.characterId,
@@ -80,12 +80,8 @@ export function buildPreviewInfo(
                 attribute: situation.attribute,
                 prefix: situation.prefix,
                 resourceSetName: situation.resourceSetName,
-                maxLevel: parameters?.level ?? null,
-                parameters: parameters ? {
-                    performance: parameters.performance,
-                    technique: parameters.technique,
-                    visual: parameters.visual,
-                } : null,
+                maxLevel,
+                parameters,
                 skill: {
                     skillName: skillDef?.skillName ?? "",
                     skillId: skillDef?.skillId ?? null,
@@ -118,7 +114,7 @@ export function buildPreviewInfo(
                 .map(entry => ({ difficulty: entry.difficulty, playLevel: entry.playLevel }))
                 .sort((a, b) => a.playLevel - b.playLevel),
         }));
-    return { dataVersion: version, cards, musics };
+    return { dataVersion: version, statBasis: CARD_STAT_BASIS, cards, musics };
 }
 
 function formatMusicDetail(music: any): string {

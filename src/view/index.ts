@@ -66,7 +66,7 @@ function listPreviewDirs(): string[] {
 /**
  * 绘制总览标题栏（白色圆角面板，横跨整幅宽）：
  *   主行 = dataVersion 大字 + 右上「全 N 张」金色胶囊
- *   副行 = 渲染日期时间
+ *   副行 = 渲染日期时间及三围口径（新版数据）
  *   底部 = 暖金渐变装饰条
  */
 function drawHeader(
@@ -75,6 +75,7 @@ function drawHeader(
   dataVersion: string,
   count: number,
   y: number,
+  statBasis?: string,
 ): number {
   const h = S.HEADER_H;
   const px = S.HEADER_PAD_X;
@@ -125,7 +126,7 @@ function drawHeader(
   const ts = `${now.getFullYear()}/${p2(now.getMonth() + 1)}/${p2(now.getDate())} ${p2(now.getHours())}:${p2(now.getMinutes())}`;
   ctx.font = S.FONT.headerSub;
   ctx.fillStyle = S.TEXT_SUB;
-  ctx.fillText(`渲染于 ${ts}`, innerX, innerTop + S.LH.headerTitle + 8);
+  ctx.fillText(`渲染于 ${ts}${statBasis ? ` · ${statBasis}` : ""}`, innerX, innerTop + S.LH.headerTitle + 8);
 
   // 底部装饰条（暖金渐变）
   const bar = ctx.createLinearGradient(
@@ -199,6 +200,7 @@ export async function renderOverviewDirectory(dir: string): Promise<string | nul
   if (!existsSync(infoPath)) throw new Error(`未找到 ${infoPath}`);
   const info = JSON.parse(readFileSync(infoPath, "utf8")) as {
     dataVersion?: string;
+    statBasis?: string;
     cards?: CardInfo[];
   };
   if ((info.cards ?? []).length === 0) {
@@ -278,7 +280,7 @@ export async function renderOverviewDirectory(dir: string): Promise<string | nul
   drawBackground(ctx, canvasW, totalH);
 
   // 标题栏（横跨顶部）
-  drawHeader(ctx, canvasW, info.dataVersion ?? "", n, S.TOP_PAD);
+  drawHeader(ctx, canvasW, info.dataVersion ?? "", n, S.TOP_PAD, info.statBasis);
   const cellTop = S.TOP_PAD + headerH + S.CELL_GAP;
 
   // 卡片格子（2 列网格：行 r = floor(i/2)，列 c = i%2）

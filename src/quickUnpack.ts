@@ -15,6 +15,7 @@ import readline from "node:readline/promises";
 import { downloadAB } from "@/downloadAssetBundleInfo.js";
 import { compareVersions, listDownloadedVersions } from "@/compare.js";
 import { fetchSuiteMaster } from "@/garupa/api/suiteMaster.js";
+import { CARD_STAT_BASIS, fullCardParameters } from "./cardParameters.js";
 import { mainVersion, buildAssetBundleUrl, loadStore } from "@/garupa/assetBundleInfo.js";
 
 dotenv.config();
@@ -320,10 +321,7 @@ async function main() {
                     skillName: skillDef?.skillName ?? "",
                     skillId: skillDef?.skillId ?? null,
                 };
-            // 最高级三围：取 parameterMap 中 level 最大的一档
-            const paramEntries = sit.parameterMap ? Object.values(sit.parameterMap) : [];
-            const maxParam = paramEntries.reduce<any>((best, cur: any) =>
-                !best || (cur?.level ?? 0) > (best.level ?? 0) ? cur : best, null);
+            const { maxLevel, parameters } = fullCardParameters(sit);
             cards.push({
                 situationId,
                 characterId: sit.characterId,
@@ -333,14 +331,8 @@ async function main() {
                 attribute: sit.attribute,
                 prefix: sit.prefix,
                 resourceSetName: sit.resourceSetName,
-                maxLevel: maxParam?.level ?? null,
-                parameters: maxParam
-                    ? {
-                        performance: maxParam.performance,
-                        technique: maxParam.technique,
-                        visual: maxParam.visual,
-                    }
-                    : null,
+                maxLevel,
+                parameters,
                 skill,
             });
         }
@@ -365,7 +357,7 @@ async function main() {
         }
         await fs.writeFile(
             path.join(previewRoot, "info.json"),
-            JSON.stringify({ dataVersion: version, cards, musics }, null, 2),
+            JSON.stringify({ dataVersion: version, statBasis: CARD_STAT_BASIS, cards, musics }, null, 2),
             "utf-8"
         );
 
