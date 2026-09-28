@@ -1,10 +1,10 @@
 {
   "latest": {
-    "clientVersion": "10.1.4",
-    "dataVersion": "10.1.0.290",
-    "masterDataVersion": "10.1.0.292"
+    "clientVersion": "10.2.0",
+    "dataVersion": "10.2.0.120",
+    "masterDataVersion": "10.2.0.120"
   },
-  "nowDataVersion": "10.1.0.250",
+  "nowDataVersion": "10.2.0.120",
   "hashes": {
     "10.2.0": "b3da1643334f3d8433dbffe65574774e5743b2e72bcd44920f09efc8270aad9d",
     "10.1.0": "e019f5bbbae4e182041ed1731df6e08b7708aa3536aefaeaeec04b1951c4d048",
@@ -19,6 +19,10 @@
     "10.1.4": {
       "dataVersion": "10.1.0.290",
       "masterDataVersion": "10.1.0.292"
+    },
+    "10.2.0": {
+      "dataVersion": "10.2.0.120",
+      "masterDataVersion": "10.2.0.120"
     }
   }
 }
