@@ -85,7 +85,6 @@ async function downloadWithRetry(input: string): Promise<{ version: string, file
 async function main() {
     console.log('正在执行完整流程......')
     const readline = await import('readline/promises');
-    const process = await import('process');
 
     const rl = readline.createInterface({
         input: process.stdin,
