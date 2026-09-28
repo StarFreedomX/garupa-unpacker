@@ -27,6 +27,16 @@ export function predictedVersion(observed: string, knownLines: string[] = []): s
     return newest && compareVersions(newest, mainVersion(observed)) < 0 ? `${newest}.100` : next;
 }
 
+/** 一键解包目标：留空时推算下一版；手动填当前版时同样等待下一版。 */
+export function unpackTargetVersion(observed: string, current: string, requested: string | undefined, knownLines: string[]): string {
+    const selected = requested || predictedVersion(observed, knownLines);
+    const target = selected === current ? predictedVersion(current, knownLines) : selected;
+    if (compareVersions(target, current) >= 0) {
+        throw new Error(`目标版本 ${target} 不晚于本机当前版本 ${current}`);
+    }
+    return target;
+}
+
 /** Parse interactive CDN candidates supplied as full four-part data versions. */
 export function parseTargetVersions(input: string): string[] {
     const versions = input.split(/[\s,，]+/).map(value => value.trim()).filter(Boolean);

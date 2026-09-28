@@ -12,7 +12,7 @@ import type { UnpackServerConfig } from "../src/unpackServer/config.js";
 import { emptyServerState, ensureCycle, loadServerState, saveServerState } from "../src/unpackServer/state.js";
 import { pickTargetFiles, resourceSetsFromDiff, selectBundleTargets } from "../src/unpackServer/targets.js";
 import { indexFilesToMemory, type UnpackedBundleIndex } from "../src/unpackServer/unpackedIndex.js";
-import { incrementVersion, parseTargetVersions, predictedVersion } from "../src/unpackServer/version.js";
+import { incrementVersion, parseTargetVersions, predictedVersion, unpackTargetVersion } from "../src/unpackServer/version.js";
 
 async function temporary(t: TestContext): Promise<string> {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "garupa-server-"));
@@ -25,6 +25,14 @@ test("version prediction follows normal and 90 rollover steps", () => {
     assert.equal(incrementVersion("10.1.0.290"), "10.1.0.310");
     assert.throws(() => incrementVersion("10.1.bad.20"), /Invalid/);
     assert.throws(() => incrementVersion("20"), /Invalid/);
+});
+
+test("one-shot unpack waits for the next version when the current version is already unpacked", () => {
+    const knownLines = ["10.2.0"];
+    assert.equal(unpackTargetVersion("10.2.0.120", "10.2.0.120", undefined, knownLines), "10.2.0.130");
+    assert.equal(unpackTargetVersion("10.2.0.120", "10.2.0.120", "10.2.0.130", knownLines), "10.2.0.130");
+    assert.equal(unpackTargetVersion("10.2.0.120", "10.2.0.120", "10.2.0.120", knownLines), "10.2.0.130");
+    assert.throws(() => unpackTargetVersion("10.2.0.120", "10.2.0.120", "10.2.0.110", knownLines), /不晚于/);
 });
 
 test("in-memory manifests compare without writing a temporary diff", () => {

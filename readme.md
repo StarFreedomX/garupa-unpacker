@@ -118,6 +118,8 @@ yarn probe:cdn 10.1.0.310
 
 `yarn grp` 依次下载新旧 AssetBundleInfo、生成差异清单，再按 bundle 并发执行：
 
+两个版本都留空时，旧版本固定取 `nowDataVersion`，新版本从 `/application` 当前版本推算下一版；目标尚未发布时等待重试，不会退回已下载的更旧版本。
+
 1. 下载一个 bundle 到 Buffer，立即用 `readAssets` 解包；其他 bundle 可以继续下载。
 2. 在内存中合并同一 bundle 的 ACB / AWB 分片，直接将 ACB 音轨 Buffer 交给 HCA 解码器，得到 WAV Buffer。
 3. 对变化 bundle 的新旧版本按最终文件相对路径和字节内容比较，只写新增或变化的文件；音频比较最终 WAV，完整分片会在比较前保留。

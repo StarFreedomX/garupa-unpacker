@@ -52,8 +52,8 @@ yarn server:unpack                                          # 解开本次全部
 （package.json scripts：`yarn grp` = index、`yarn dab` = downloadAssetBundleInfo、`yarn com` = compare、`yarn geta` = getAssets、`yarn exp` = export、`yarn rmuf` = removeUnchangedFiles、`yarn mb` = mergeBytes、`yarn da` = decodeAcb、`yarn ff` = flatFolder、`yarn server:notify` = 探测发送、`yarn server:unpack` = 常驻全解）
 
 ### 一键流程（index.ts）
-1. `downloadAB(输入)` 确定本次运行的版本（输入版本号 / 完整 URL / 留空自动检测）→ 下载 AssetBundleInfo
-2. `compareVersions(result.version)` 对比「输入版本 vs 其前一个版本」→ `compare/diff_<旧>_to_<新>.json`
+1. 新版本可输入版本号 / 完整 URL；留空时从 `/application` 当前版本推算下一个 CDN 版本并等待发布。旧版本留空固定使用 `nowDataVersion`；下载两版 AssetBundleInfo。
+2. `compareVersions(新版本, 旧版本)` 对比本机已解包版本与目标版本 → `compare/diff_<旧>_to_<新>.json`
 3. `downloadDiffAssets(PROJECT_ROOT, outFile, diff)` 直接接收内存 diff，按 bundle 限制并发：Buffer 下载 → `readAssets` → ACB/AWB 合并 → ACB 音轨 Buffer → HCA `decodeToMemory` → 最终文件内存对比 → 仅写变化文件。
 4. 最终文件直接写入 `assets/<新版本>/`，保留原目录结构，不区分 new/change 输出层级、不扁平化；失败保留已写出的文件，不清空结果目录、不更新 nowDataVersion。没有 analysing/change_old/ACB/HCA 中间产物，重跑重新下载处理，覆盖本次产出的同路径文件。
 5. 全部成功后重新读取 store 并更新 nowDataVersion。
